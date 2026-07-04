@@ -509,8 +509,11 @@ export default function IssuePage({
 
         {/* Your observations */}
         <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-          <p className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-400">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
             Your Observations
+          </p>
+          <p className="mb-3 text-xs leading-relaxed text-stone-500">
+            Describe what you&apos;re actually seeing in your own words. Mention any brands, models, or details not captured in the inspection notes. Don&apos;t worry about being precise — just say it all and we&apos;ll take care of the rest.
           </p>
 
           {issueDetails?.userObservation && !observationExpanded ? (
@@ -530,13 +533,10 @@ export default function IssuePage({
             </div>
           ) : observationExpanded ? (
             <div className="space-y-3">
-              <p className="text-xs leading-relaxed text-stone-500">
-                Describe what you&apos;re actually seeing in your own words. Mention any brands, models, or details not captured in the inspection notes. Don&apos;t worry about being precise — just say it all and we&apos;ll take care of the rest.
-              </p>
               <textarea
                 value={observationDraft}
                 onChange={(e) => setObservationDraft(e.target.value)}
-                placeholder="Just describe everything you're seeing — don't worry about how it sounds. Include brand names, model numbers, what the problem looks like, when it happens, anything not in the inspection notes. The more detail the better — we'll clean it up for you."
+                placeholder=""
                 rows={4}
                 autoFocus
                 className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
