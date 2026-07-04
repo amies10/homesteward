@@ -19,10 +19,17 @@ export interface Issue {
   // Populated on demand (not present in parse response):
   materialsList?: Array<{ item: string; estimatedCost: string }>;
   stepByStepPlan?: string[];
+  // User-managed fields:
+  userAdded?: boolean;
+  notes?: string;
+  deleted?: boolean;
 }
 
 export interface ReportSection {
   name: string;
+  description?: string;
+  slug?: string;       // explicit routing key; set on custom sections and after rename
+  userAdded?: boolean; // true for sections added by the user (not from the parsed report)
   issues: Issue[];
 }
 
@@ -43,6 +50,16 @@ export interface IssueDetails {
   materialsList?: Array<{ item: string; estimatedCost: string }>;
   stepByStepPlan?: string[];
   contractorBriefing?: string;
+  userObservation?: string;
+}
+
+export interface ContractorResult {
+  name: string;
+  address: string;
+  phone?: string;
+  rating?: number;
+  reviewCount?: number;
+  mapsUrl: string;
 }
 
 export interface StoredChatMessage {
@@ -70,6 +87,10 @@ export function diyKey(
   type: "materials" | "steps" | "chat"
 ): string {
   return `homesteward_diy_${type}_${slug}_${index}`;
+}
+
+export function contractorsKey(slug: string, index: number): string {
+  return `homesteward_contractors_${slug}_${index}`;
 }
 
 export interface SectionConfig {

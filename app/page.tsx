@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { sections, normalize, type ParsedReport, type Issue } from "@/lib/sections";
+import { sections, normalize, type ParsedReport, type Issue, type ReportSection } from "@/lib/sections";
 import {
   saveReport,
   loadLatestReport,
@@ -11,6 +11,7 @@ import {
   loadIgnored,
   loadUserProfile,
   clearLocalReport,
+  updateReport,
 } from "@/lib/data";
 import { supabase } from "@/lib/supabase-client";
 
@@ -36,6 +37,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showAddSection, setShowAddSection] = useState(false);
+  const [newSectionName, setNewSectionName] = useState("");
+  const [newSectionDesc, setNewSectionDesc] = useState("");
+  const [addingSectionLoading, setAddingSectionLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,12 +62,43 @@ export default function Dashboard() {
 
   function issueCountFor(label: string, slug: string): number {
     if (!report) return 0;
-    const target = normalize(label);
-    const section = report.sections.find((s) => normalize(s.name) === target);
+    const section = report.sections.find(
+      (s) => s.slug === slug || normalize(s.name) === normalize(label)
+    );
     if (!section) return 0;
     return section.issues.filter(
-      (_, i) => !completions[`${slug}-${i}`] && !ignored[`${slug}-${i}`]
+      (issue, i) => !issue.deleted && !completions[`${slug}-${i}`] && !ignored[`${slug}-${i}`]
     ).length;
+  }
+
+  async function handleAddSection() {
+    if (!newSectionName.trim() || !report) return;
+    setAddingSectionLoading(true);
+
+    const name = newSectionName.trim();
+    const base = name.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-");
+    const taken = new Set([
+      ...sections.map((s) => s.slug),
+      ...report.sections.filter((s) => s.slug).map((s) => s.slug!),
+    ]);
+    let slug = base;
+    let n = 2;
+    while (taken.has(slug)) { slug = `${base}-${n}`; n++; }
+
+    const newSection: ReportSection = {
+      name,
+      description: newSectionDesc.trim() || undefined,
+      slug,
+      userAdded: true,
+      issues: [],
+    };
+    const newReport: ParsedReport = { ...report, sections: [...report.sections, newSection] };
+    await updateReport(newReport);
+    setReport(newReport);
+    setShowAddSection(false);
+    setNewSectionName("");
+    setNewSectionDesc("");
+    setAddingSectionLoading(false);
   }
 
   async function handleFile(file: File) {
@@ -221,6 +257,10 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {sections.map((section) => {
+              const reportSection = report?.sections.find(
+                (s) => s.slug === section.slug || normalize(s.name) === normalize(section.label)
+              );
+              const displayName = reportSection?.name ?? section.label;
               const count = issueCountFor(section.label, section.slug);
               return (
                 <Link
@@ -230,7 +270,7 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-stone-900 group-hover:text-stone-700">
-                      {section.label}
+                      {displayName}
                     </span>
                     {count > 0 && (
                       <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
@@ -244,9 +284,108 @@ export default function Dashboard() {
                 </Link>
               );
             })}
+
+            {/* Custom sections */}
+            {report?.sections
+              .filter((s) => s.userAdded && s.slug)
+              .map((s) => {
+                const count = issueCountFor(s.name, s.slug!);
+                return (
+                  <Link
+                    key={s.slug}
+                    href={`/section/${s.slug}`}
+                    className="group flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-5 py-4 transition-colors hover:border-stone-300 hover:bg-stone-50"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-stone-900 group-hover:text-stone-700">
+                        {s.name}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {count > 0 && (
+                          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                            {count} issue{count !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                        <span className="rounded-full border border-stone-200 px-2 py-0.5 text-xs text-stone-400">
+                          Custom
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs leading-relaxed text-stone-400">
+                      {s.description ?? "Custom section"}
+                    </span>
+                  </Link>
+                );
+              })}
           </div>
+
+          {/* Add Section */}
+          {report && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowAddSection(true)}
+                className="rounded-md border border-dashed border-stone-300 px-4 py-2 text-sm text-stone-500 transition-colors hover:border-stone-400 hover:text-stone-700"
+              >
+                + Add Section
+              </button>
+            </div>
+          )}
         </div>
       </main>
+
+      {showAddSection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-lg border border-stone-200 bg-white shadow-lg">
+            <div className="border-b border-stone-100 px-6 py-4">
+              <p className="text-sm font-semibold text-stone-900">Add Section</p>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-stone-700">
+                  Section name
+                </label>
+                <input
+                  type="text"
+                  value={newSectionName}
+                  onChange={(e) => setNewSectionName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddSection(); }}
+                  placeholder="e.g. Pool, Garage, Deck"
+                  autoFocus
+                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-stone-700">
+                  Description{" "}
+                  <span className="font-normal text-stone-400">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={newSectionDesc}
+                  onChange={(e) => setNewSectionDesc(e.target.value)}
+                  placeholder="Brief description"
+                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
+              <button
+                onClick={() => { setShowAddSection(false); setNewSectionName(""); setNewSectionDesc(""); }}
+                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSection}
+                disabled={!newSectionName.trim() || addingSectionLoading}
+                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {addingSectionLoading ? "Adding…" : "Add Section"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSummaryModal && report && (() => {
         const allIssues = report.sections.flatMap((s) => s.issues);

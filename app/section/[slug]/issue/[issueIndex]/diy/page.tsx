@@ -10,7 +10,8 @@ import {
   type IssueDetails,
   type StoredChatMessage,
 } from "@/lib/sections";
-import { loadLatestReport, loadIssueDetails } from "@/lib/data";
+import { loadLatestReport, loadIssueDetails, saveIssueDetails } from "@/lib/data";
+import MicButton from "@/app/components/MicButton";
 
 export default function DIYPage({
   params,
@@ -19,7 +20,7 @@ export default function DIYPage({
 }) {
   const { slug, issueIndex } = use(params);
   const index = parseInt(issueIndex, 10);
-  const section = sections.find((s) => s.slug === slug);
+  const sectionConfig = sections.find((s) => s.slug === slug);
 
   const [issue, setIssue] = useState<
     ParsedReport["sections"][0]["issues"][0] | null
@@ -39,19 +40,24 @@ export default function DIYPage({
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  const [showRefineModal, setShowRefineModal] = useState(false);
+  const [refineFeedback, setRefineFeedback] = useState("");
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (section) {
-      loadLatestReport().then((report) => {
-        if (!report) return;
-        const reportSection = report.sections.find(
-          (s) => normalize(s.name) === normalize(section.label)
-        );
-        setIssue(reportSection?.issues[index] ?? null);
-      });
-    }
+    loadLatestReport().then((report) => {
+      if (!report) return;
+      const reportSection = report.sections.find(
+        (s) =>
+          s.slug === slug ||
+          (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
+      );
+      setIssue(reportSection?.issues[index] ?? null);
+    });
 
     loadIssueDetails(slug, index).then((details) => {
       if (details) setIssueDetails(details);
@@ -69,19 +75,11 @@ export default function DIYPage({
       const c = localStorage.getItem(cKey);
       if (c) setChatMessages(JSON.parse(c));
     } catch {}
-  }, [slug, index, section]);
+  }, [slug, index, sectionConfig]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, chatLoading]);
-
-  if (!section) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50">
-        <p className="text-sm text-stone-500">Section not found.</p>
-      </div>
-    );
-  }
 
   function toggleMaterial(i: number) {
     const next = { ...checkedMaterials, [i]: !checkedMaterials[i] };
@@ -171,6 +169,47 @@ export default function DIYPage({
     }
   }
 
+  async function handleRefine() {
+    if (!refineFeedback.trim() || !issue || !issueDetails) return;
+    setRefining(true);
+    setRefineError(null);
+    try {
+      const res = await fetch("/api/generate-diy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issueTitle: issue.title,
+          issueDescription: issue.description,
+          severity: issue.severity,
+          recommendedAction: issue.recommendedAction,
+          feedback: refineFeedback.trim(),
+          existingMaterialsList: issueDetails.materialsList,
+          existingStepByStepPlan: issueDetails.stepByStepPlan,
+          userObservation: issueDetails.userObservation,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Refinement failed");
+      const updated: IssueDetails = {
+        ...issueDetails,
+        materialsList: data.materialsList,
+        stepByStepPlan: data.stepByStepPlan,
+      };
+      setIssueDetails(updated);
+      await saveIssueDetails(slug, index, updated);
+      setCheckedMaterials({});
+      setCheckedSteps({});
+      localStorage.removeItem(diyKey(slug, index, "materials"));
+      localStorage.removeItem(diyKey(slug, index, "steps"));
+      setShowRefineModal(false);
+      setRefineFeedback("");
+    } catch (err) {
+      setRefineError(err instanceof Error ? err.message : "Refinement failed");
+    } finally {
+      setRefining(false);
+    }
+  }
+
   const materials = issueDetails?.materialsList ?? [];
   const steps = issueDetails?.stepByStepPlan ?? [];
   const materialsCheckedCount = materials.filter((_, i) => checkedMaterials[i]).length;
@@ -243,9 +282,17 @@ export default function DIYPage({
               <p className="text-sm font-semibold text-stone-900">
                 Step-by-Step Plan
               </p>
-              <span className="text-xs text-stone-400">
-                {stepsCheckedCount}/{steps.length} done
-              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => { setShowRefineModal(true); setRefineError(null); }}
+                  className="text-xs text-stone-400 underline underline-offset-2 hover:text-stone-600"
+                >
+                  Refine This Plan
+                </button>
+                <span className="text-xs text-stone-400">
+                  {stepsCheckedCount}/{steps.length} done
+                </span>
+              </div>
             </div>
             <ol className="space-y-3">
               {steps.map((step, i) => (
@@ -389,6 +436,10 @@ export default function DIYPage({
                 className="hidden"
                 onChange={handleImageSelect}
               />
+              <MicButton
+                onTranscript={(t) => setInputText((prev) => prev ? `${prev} ${t}` : t)}
+                disabled={chatLoading}
+              />
               <button
                 onClick={() => imageInputRef.current?.click()}
                 disabled={chatLoading}
@@ -422,6 +473,55 @@ export default function DIYPage({
           </div>
         </div>
       </main>
+
+      {showRefineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
+            <div className="border-b border-stone-100 px-6 py-4">
+              <p className="text-sm font-semibold text-stone-900">Refine This Plan</p>
+              <p className="mt-0.5 text-xs text-stone-400">
+                Describe what you found or what isn&apos;t working with the current plan.
+              </p>
+            </div>
+            <div className="px-6 py-5">
+              <textarea
+                value={refineFeedback}
+                onChange={(e) => setRefineFeedback(e.target.value)}
+                placeholder="e.g. The shutoff valve isn't where the plan says. The tile I need to remove is larger than expected. I don't have a tile saw — what's the alternative?"
+                rows={5}
+                autoFocus
+                className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
+              />
+              <div className="mt-1.5 flex items-center justify-between">
+                <span />
+                <MicButton
+                  onTranscript={(t) => setRefineFeedback((prev) => prev ? `${prev} ${t}` : t)}
+                  disabled={refining}
+                />
+              </div>
+              {refineError && (
+                <p className="mt-1 text-xs text-red-600">{refineError}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
+              <button
+                onClick={() => { setShowRefineModal(false); setRefineFeedback(""); setRefineError(null); }}
+                disabled={refining}
+                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRefine}
+                disabled={!refineFeedback.trim() || refining}
+                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {refining ? "Regenerating…" : "Regenerate Plan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

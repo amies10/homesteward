@@ -88,7 +88,7 @@ export async function loadIssueDetails(
     try {
       const { data, error } = await supabase
         .from("issue_details")
-        .select("materials_list, step_by_step_plan, contractor_briefing")
+        .select("materials_list, step_by_step_plan, contractor_briefing, user_observation")
         .eq("report_id", reportId)
         .eq("section_slug", slug)
         .eq("issue_index", issueIndex)
@@ -100,6 +100,7 @@ export async function loadIssueDetails(
           materialsList: data.materials_list ?? undefined,
           stepByStepPlan: data.step_by_step_plan ?? undefined,
           contractorBriefing: data.contractor_briefing ?? undefined,
+          userObservation: data.user_observation ?? undefined,
         };
         localStorage.setItem(issueDetailsKey(slug, issueIndex), JSON.stringify(details));
         return details;
@@ -137,6 +138,7 @@ export async function saveIssueDetails(
         materials_list: details.materialsList ?? null,
         step_by_step_plan: details.stepByStepPlan ?? null,
         contractor_briefing: details.contractorBriefing ?? null,
+        user_observation: details.userObservation ?? null,
         updated_at: new Date().toISOString(),
         user_id: userId,
       },
@@ -192,6 +194,21 @@ export async function loadUserProfile(): Promise<UserProfile | null> {
   } catch {
     const stored = localStorage.getItem(USER_PROFILE_KEY);
     return stored ? (JSON.parse(stored) as UserProfile) : null;
+  }
+}
+
+export async function updateReport(report: ParsedReport): Promise<void> {
+  localStorage.setItem(REPORT_KEY, JSON.stringify(report));
+  const reportId = localStorage.getItem(REPORT_ID_KEY);
+  if (!reportId) return;
+  try {
+    const { error } = await supabase
+      .from("reports")
+      .update({ raw_sections: report.sections })
+      .eq("id", reportId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("[data] updateReport: Supabase unavailable, localStorage only.", err);
   }
 }
 
