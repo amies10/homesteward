@@ -530,10 +530,13 @@ export default function IssuePage({
             </div>
           ) : observationExpanded ? (
             <div className="space-y-3">
+              <p className="text-xs leading-relaxed text-stone-500">
+                Describe what you&apos;re actually seeing in your own words. Mention any brands, models, or details not captured in the inspection notes. Don&apos;t worry about being precise — just say it all and we&apos;ll take care of the rest.
+              </p>
               <textarea
                 value={observationDraft}
                 onChange={(e) => setObservationDraft(e.target.value)}
-                placeholder="Describe what you see, hear, or smell — measurements, timing, exact location, severity. Speak naturally; we'll clean it up."
+                placeholder="Just describe everything you're seeing — don't worry about how it sounds. Include brand names, model numbers, what the problem looks like, when it happens, anything not in the inspection notes. The more detail the better — we'll clean it up for you."
                 rows={4}
                 autoFocus
                 className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
