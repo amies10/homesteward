@@ -20,17 +20,16 @@ import {
   removeIgnore,
   updateReport,
 } from "@/lib/data";
+import Modal from "@/app/components/Modal";
+import ChatFAB from "@/app/components/ChatFAB";
+import { ChevronLeftIcon, PencilIcon, PlusIcon, SettingsIcon, TrashIcon } from "@/app/components/icons";
 
-const SEVERITY: Record<Issue["severity"], { card: string; badge: string; label: string }> = {
-  safety:      { card: "border-red-200 bg-red-50",      badge: "bg-red-100 text-red-700",       label: "Safety" },
-  repair:      { card: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700", label: "Repair" },
-  maintenance: { card: "border-amber-200 bg-amber-50",  badge: "bg-amber-100 text-amber-700",   label: "Maintenance" },
-  improvement: { card: "border-blue-200 bg-blue-50",    badge: "bg-blue-100 text-blue-700",     label: "Improvement" },
-  fyi:         { card: "border-stone-200 bg-stone-50",  badge: "bg-stone-100 text-stone-500",   label: "FYI" },
-};
-
-const SEVERITY_ORDER: Record<string, number> = {
-  safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
+const TYPE_LABEL: Record<Issue["severity"], string> = {
+  safety: "Safety",
+  repair: "Repair",
+  maintenance: "Maintenance",
+  improvement: "Improvement",
+  fyi: "FYI",
 };
 
 function group(done: boolean, ignored: boolean) {
@@ -38,6 +37,10 @@ function group(done: boolean, ignored: boolean) {
   if (ignored) return 1;
   return 0;
 }
+
+const SEVERITY_ORDER: Record<string, number> = {
+  safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
+};
 
 const SEVERITY_OPTIONS = [
   { value: "safety",      label: "Safety" },
@@ -60,14 +63,11 @@ export default function SectionPage({
   const [userSkillLevel, setUserSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [loaded, setLoaded]           = useState(false);
 
-  // Inline rename
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft]     = useState("");
   const [nameSaving, setNameSaving]   = useState(false);
 
-  // Add / Edit issue modal
   const [showIssueForm, setShowIssueForm]   = useState(false);
-  const [issueFormMode, setIssueFormMode]   = useState<"add" | "edit">("add");
   const [editIssueIndex, setEditIssueIndex] = useState<number | null>(null);
   const [formTitle, setFormTitle]           = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -75,7 +75,6 @@ export default function SectionPage({
   const [formNotes, setFormNotes]           = useState("");
   const [formSaving, setFormSaving]         = useState(false);
 
-  // Delete confirmation
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -90,7 +89,6 @@ export default function SectionPage({
     );
   }, []);
 
-  // Derived section data
   const sectionConfig = sections.find((s) => s.slug === slug);
   const reportSection = report?.sections.find(
     (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
@@ -98,24 +96,21 @@ export default function SectionPage({
   const displayName = reportSection?.name ?? sectionConfig?.label ?? slug;
   const displayDescription = reportSection?.description ?? sectionConfig?.description;
 
-  // Wait for load before showing custom sections (they need report data)
   if (!sectionConfig && !loaded) return null;
   if (loaded && !sectionConfig && !reportSection) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50">
-        <p className="text-sm text-stone-500">Section not found.</p>
+      <div className="flex min-h-screen items-center justify-center bg-porch-bg">
+        <p className="text-sm text-porch-text-secondary">Section not found.</p>
       </div>
     );
   }
 
-  // Helper: find the index of this section in the report sections array
   function findSectionIndex(r: ParsedReport): number {
     return r.sections.findIndex(
       (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
     );
   }
 
-  // Issues — filter soft-deleted, preserve original indices
   const allWithIndex = (reportSection?.issues ?? []).map((issue, i) => ({ issue, i }));
   const visibleWithIndex = allWithIndex.filter(({ issue }) => !issue.deleted);
 
@@ -134,10 +129,7 @@ export default function SectionPage({
     });
 
   const activeCount  = sortedIssues.filter((x) => !x.done && !x.isIgnored).length;
-  const ignoredCount = sortedIssues.filter((x) => x.isIgnored).length;
   const doneCount    = sortedIssues.filter((x) => x.done).length;
-
-  // ── Handlers ──────────────────────────────────────────────────────────────
 
   async function handleIgnore(i: number) {
     setIgnored((prev) => ({ ...prev, [`${slug}-${i}`]: true }));
@@ -166,15 +158,7 @@ export default function SectionPage({
     setNameSaving(false);
   }
 
-  function openAddForm() {
-    setIssueFormMode("add");
-    setFormTitle(""); setFormDescription(""); setFormSeverity("maintenance"); setFormNotes("");
-    setEditIssueIndex(null);
-    setShowIssueForm(true);
-  }
-
   function openEditForm(i: number, issue: Issue) {
-    setIssueFormMode("edit");
     setFormTitle(issue.title);
     setFormDescription(issue.description);
     setFormSeverity(issue.severity);
@@ -184,38 +168,19 @@ export default function SectionPage({
   }
 
   async function handleSaveIssueForm() {
-    if (!formTitle.trim() || !formDescription.trim() || !report) return;
+    if (!formTitle.trim() || !formDescription.trim() || !report || editIssueIndex === null) return;
     setFormSaving(true);
     const newReport: ParsedReport = JSON.parse(JSON.stringify(report));
-
-    if (issueFormMode === "add") {
-      const newIssue: Issue = {
-        title: formTitle.trim(),
-        description: formDescription.trim(),
-        severity: formSeverity,
-        recommendedAction: formDescription.trim(),
-        userAdded: true,
-        notes: formNotes.trim() || undefined,
-      };
-      const idx = findSectionIndex(newReport);
-      if (idx === -1) {
-        newReport.sections.push({ name: sectionConfig?.label ?? slug, slug, issues: [newIssue] });
-      } else {
-        newReport.sections[idx].issues.push(newIssue);
-      }
-    } else {
-      if (editIssueIndex === null) return;
-      const idx = findSectionIndex(newReport);
-      if (idx === -1) return;
-      newReport.sections[idx].issues[editIssueIndex] = {
-        ...newReport.sections[idx].issues[editIssueIndex],
-        title: formTitle.trim(),
-        description: formDescription.trim(),
-        severity: formSeverity,
-        recommendedAction: formDescription.trim(),
-        notes: formNotes.trim() || undefined,
-      };
-    }
+    const idx = findSectionIndex(newReport);
+    if (idx === -1) return;
+    newReport.sections[idx].issues[editIssueIndex] = {
+      ...newReport.sections[idx].issues[editIssueIndex],
+      title: formTitle.trim(),
+      description: formDescription.trim(),
+      severity: formSeverity,
+      recommendedAction: formDescription.trim(),
+      notes: formNotes.trim() || undefined,
+    };
 
     await updateReport(newReport);
     setReport(newReport);
@@ -235,310 +200,259 @@ export default function SectionPage({
     setConfirmDeleteIndex(null);
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="shrink-0 text-sm text-stone-400 transition-colors hover:text-stone-600"
-              >
-                ← Dashboard
-              </Link>
-              <div className="h-4 w-px bg-stone-200" />
-              <div className="flex items-center gap-2">
-                {editingName ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleRename();
-                        if (e.key === "Escape") setEditingName(false);
-                      }}
-                      autoFocus
-                      className="rounded-md border border-stone-300 px-2 py-1 text-lg font-semibold text-stone-900 focus:border-stone-500 focus:outline-none"
-                    />
-                    <button
-                      onClick={handleRename}
-                      disabled={nameSaving || !nameDraft.trim()}
-                      className="rounded-md border border-stone-800 bg-stone-900 px-3 py-1 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-                    >
-                      {nameSaving ? "Saving…" : "Save"}
-                    </button>
-                    <button
-                      onClick={() => setEditingName(false)}
-                      className="text-xs text-stone-400 hover:text-stone-600"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <h1 className="text-xl font-semibold tracking-tight text-stone-900">
-                      {displayName}
-                    </h1>
-                    {report && (
-                      <button
-                        onClick={() => { setNameDraft(displayName); setEditingName(true); }}
-                        title="Rename section"
-                        className="rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                        </svg>
-                      </button>
-                    )}
-                    {displayDescription && (
-                      <span className="hidden text-sm text-stone-400 sm:inline">
-                        {displayDescription}
-                      </span>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {report && !editingName && (
-              <button
-                onClick={openAddForm}
-                className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50"
-              >
-                + Add Issue
-              </button>
-            )}
-          </div>
+    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-porch-border bg-porch-surface px-5 py-[18px]">
+        <Link href="/" className="flex items-center gap-1.5 text-sm text-porch-text-secondary no-underline">
+          <ChevronLeftIcon />
+          Dashboard
+        </Link>
+        <div className="flex items-center gap-1">
+          <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1.5">
+            <SettingsIcon />
+          </Link>
+          {report && (
+            <Link
+              href={`/add-issue?section=${slug}`}
+              className="btn-press flex items-center gap-1.5 rounded-[10px] border-none bg-porch-accent px-3.5 py-2 text-[13.5px] font-medium text-white no-underline"
+            >
+              <PlusIcon size={14} color="#FFFFFF" strokeWidth={2.2} />
+              Add Issue
+            </Link>
+          )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        {!loaded ? null : !report ? (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-10 text-center">
-            <p className="text-sm text-stone-500">
-              No inspection report uploaded yet.{" "}
-              <Link href="/" className="text-stone-700 underline underline-offset-2">
-                Go to the dashboard
-              </Link>{" "}
-              to upload one.
-            </p>
-          </div>
-        ) : sortedIssues.length === 0 ? (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-10 text-center">
-            <p className="text-sm text-stone-500">No issues found for this section.</p>
+      <div className="px-5 pb-1 pt-[22px]">
+        {editingName ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleRename();
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              autoFocus
+              className="rounded-[10px] border border-porch-border-input bg-porch-surface px-3 py-1.5 font-display text-lg font-semibold text-porch-text focus:outline-none"
+            />
+            <button
+              onClick={handleRename}
+              disabled={nameSaving || !nameDraft.trim()}
+              className="btn-press rounded-[8px] border-none bg-porch-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {nameSaving ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setEditingName(false)} className="text-xs text-porch-text-tertiary">
+              Cancel
+            </button>
           </div>
         ) : (
-          <div className="space-y-3">
-            <p className="mb-6 text-sm text-stone-500">
-              {activeCount} active issue{activeCount !== 1 ? "s" : ""}
-              {ignoredCount > 0 && <span className="ml-2 text-stone-400">· {ignoredCount} ignored</span>}
-              {doneCount > 0    && <span className="ml-2 text-stone-400">· {doneCount} complete</span>}
-            </p>
+          <div className="flex items-center gap-2">
+            <span className="font-display text-[25px] font-semibold text-porch-text">{displayName}</span>
+            {report && (
+              <button
+                onClick={() => { setNameDraft(displayName); setEditingName(true); }}
+                title="Rename section"
+                aria-label="Edit section name"
+                className="flex items-center p-0.5"
+              >
+                <PencilIcon />
+              </button>
+            )}
+          </div>
+        )}
+        {displayDescription && (
+          <div className="mt-1 text-sm leading-relaxed text-porch-text-secondary">{displayDescription}</div>
+        )}
+      </div>
 
-            {sortedIssues.map(({ issue, i, done, isIgnored }) => {
-              const style  = SEVERITY[issue.severity] ?? SEVERITY.fyi;
-              const dimmed = done || isIgnored;
-              const skillTag =
-                !done && !isIgnored && userSkillLevel && issue.minimumSkillLevel
-                  ? SKILL_RANK[userSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel]
-                    ? ({ label: "DIY-friendly",    cls: "bg-green-50 text-green-700" } as const)
-                    : ({ label: "Pro recommended", cls: "bg-amber-50 text-amber-700" } as const)
-                  : null;
+      <div className="px-5 pb-1 pt-3.5 text-[13px] text-porch-text-tertiary">
+        {activeCount} thing{activeCount !== 1 ? "s" : ""} to look at · {doneCount} taken care of
+      </div>
 
-              return (
-                <div
-                  key={i}
-                  className={`rounded-lg border px-5 py-4 ${dimmed ? "border-stone-200 bg-white opacity-50" : style.card}`}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Clickable area */}
-                    <Link
-                      href={`/section/${slug}/issue/${i}`}
-                      className="min-w-0 flex-1 hover:opacity-75"
-                    >
-                      <div className="mb-2 flex items-start justify-between gap-4">
-                        <span className={`text-sm font-medium ${dimmed ? "text-stone-400 line-through" : "text-stone-900"}`}>
-                          {issue.title}
+      {!loaded ? null : !report ? (
+        <div className="mx-5 mt-4 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+          <p className="text-sm text-porch-text-secondary">
+            No inspection report uploaded yet.{" "}
+            <Link href="/" className="text-porch-accent underline underline-offset-2">
+              Go to the dashboard
+            </Link>{" "}
+            to upload one.
+          </p>
+        </div>
+      ) : sortedIssues.length === 0 ? (
+        <div className="mx-5 mt-4 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+          <p className="text-sm text-porch-text-secondary">No issues found for this section.</p>
+        </div>
+      ) : (
+        sortedIssues.map(({ issue, i, done, isIgnored }) => {
+          const dimmed = done || isIgnored;
+          const skillTag =
+            !done && !isIgnored && userSkillLevel && issue.minimumSkillLevel
+              ? SKILL_RANK[userSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel]
+                ? { label: "DIY-friendly", cls: "text-porch-accent bg-porch-accent-tint" }
+                : { label: "Pro recommended", cls: "text-porch-pro-text bg-porch-pro-bg" }
+              : null;
+
+          return (
+            <div key={i} className="px-5 py-2">
+              <div
+                style={{ opacity: dimmed ? 0.5 : 1 }}
+                className="relative rounded-2xl border border-porch-border bg-porch-surface px-[18px] py-4 shadow-[0_1px_2px_rgba(38,34,32,0.03)]"
+              >
+                {issue.severity === "safety" && !dimmed && (
+                  <span className="absolute left-[-1px] top-4 h-[22px] w-1 rounded-r-[3px] bg-porch-urgent" />
+                )}
+                <Link href={`/section/${slug}/issue/${i}`} className="block text-inherit no-underline">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[15px] font-semibold leading-snug text-porch-text">{issue.title}</span>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {skillTag && (
+                        <span className={`whitespace-nowrap rounded-full px-2.5 py-[3px] text-[11.5px] font-semibold ${skillTag.cls}`}>
+                          {skillTag.label}
                         </span>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {issue.userAdded && !done && !isIgnored && (
-                            <span className="rounded-full border border-stone-200 px-2 py-0.5 text-xs text-stone-400">
-                              Added by you
-                            </span>
-                          )}
-                          {skillTag && (
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${skillTag.cls}`}>
-                              {skillTag.label}
-                            </span>
-                          )}
-                          {done ? (
-                            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-400">✓ Complete</span>
-                          ) : isIgnored ? (
-                            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-400">Ignored</span>
-                          ) : (
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}>{style.label}</span>
-                          )}
-                        </div>
-                      </div>
-                      <p className={`text-xs leading-relaxed ${dimmed ? "text-stone-400" : "text-stone-600"}`}>
-                        {issue.description}
-                      </p>
-                      {issue.notes && !dimmed && (
-                        <p className="mt-1.5 text-xs italic leading-relaxed text-stone-400">
-                          Note: {issue.notes}
-                        </p>
                       )}
-                    </Link>
-
-                    {/* Action buttons */}
-                    <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                      {/* Edit / Delete (user-added only) */}
-                      {issue.userAdded && !done && (
-                        <>
-                          {confirmDeleteIndex === i ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleDeleteIssue(i)}
-                                className="rounded px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
-                              >
-                                Delete
-                              </button>
-                              <button
-                                onClick={() => setConfirmDeleteIndex(null)}
-                                className="rounded px-2 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <button
-                                onClick={(e) => { e.preventDefault(); openEditForm(i, issue); }}
-                                title="Edit"
-                                className="rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                                </svg>
-                              </button>
-                              <button
-                                onClick={(e) => { e.preventDefault(); setConfirmDeleteIndex(i); }}
-                                title="Delete"
-                                className="rounded p-1 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
-                                </svg>
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
-
-                      {/* Ignore / Undo */}
-                      {!done && confirmDeleteIndex !== i && (
-                        isIgnored ? (
-                          <button
-                            onClick={() => handleUnignore(i)}
-                            className="rounded px-2 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                          >
-                            Undo
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleIgnore(i)}
-                            className="rounded px-2 py-1 text-xs text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                          >
-                            Ignore
-                          </button>
-                        )
+                      {done && (
+                        <span className="whitespace-nowrap rounded-full bg-porch-success-bg px-2.5 py-[3px] text-[11.5px] font-semibold text-porch-success">
+                          Complete
+                        </span>
                       )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
+                  <div className="mt-1.5 text-[13.5px] leading-relaxed text-porch-text-secondary">{issue.description}</div>
+                  {issue.notes && !dimmed && (
+                    <p className="mt-1.5 text-xs italic leading-relaxed text-porch-text-tertiary">Note: {issue.notes}</p>
+                  )}
+                </Link>
 
-      {/* Add / Edit Issue modal */}
+                <div className="mt-3 flex items-center gap-2.5">
+                  <span className="rounded-full border border-porch-border bg-porch-surface px-2.5 py-[3px] text-xs font-medium text-[#6B5F55]">
+                    {TYPE_LABEL[issue.severity]}
+                  </span>
+                  {issue.userAdded && (
+                    <span className="rounded-full border border-porch-border px-2.5 py-[3px] text-xs text-porch-text-tertiary">
+                      Added by you
+                    </span>
+                  )}
+                  <div className="ml-auto flex items-center gap-2.5">
+                    {issue.userAdded && !done && confirmDeleteIndex !== i && (
+                      <>
+                        <button onClick={() => openEditForm(i, issue)} title="Edit" aria-label="Edit issue" className="flex items-center">
+                          <PencilIcon size={13} />
+                        </button>
+                        <button onClick={() => setConfirmDeleteIndex(i)} title="Delete" aria-label="Delete issue" className="flex items-center">
+                          <TrashIcon />
+                        </button>
+                      </>
+                    )}
+                    {confirmDeleteIndex === i ? (
+                      <>
+                        <button onClick={() => handleDeleteIssue(i)} className="text-[12.5px] font-medium text-red-600 underline">
+                          Delete
+                        </button>
+                        <button onClick={() => setConfirmDeleteIndex(null)} className="text-[12.5px] text-porch-text-tertiary underline">
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      !done && (
+                        <button
+                          onClick={() => (isIgnored ? handleUnignore(i) : handleIgnore(i))}
+                          className="text-[12.5px] text-porch-text-faint underline underline-offset-2"
+                        >
+                          {isIgnored ? "Restore" : "Not now"}
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+
       {showIssueForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="border-b border-stone-100 px-6 py-4">
-              <p className="text-sm font-semibold text-stone-900">
-                {issueFormMode === "add" ? "Add Issue" : "Edit Issue"}
-              </p>
+        <Modal onClose={() => { setShowIssueForm(false); setEditIssueIndex(null); }} maxWidth={420}>
+          <div className="mb-4 font-display text-lg font-semibold text-porch-text">Edit Issue</div>
+          <div className="space-y-3.5">
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Title</label>
+              <input
+                type="text"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                placeholder="Brief description of the issue"
+                autoFocus
+                className="w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              />
             </div>
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">Title</label>
-                <input
-                  type="text"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="Brief description of the issue"
-                  autoFocus
-                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">Description</label>
-                <textarea
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="What's the issue? Include any relevant details."
-                  rows={3}
-                  className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">Severity</label>
-                <select
-                  value={formSeverity}
-                  onChange={(e) => setFormSeverity(e.target.value as Issue["severity"])}
-                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-stone-500 focus:outline-none"
-                >
-                  {SEVERITY_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">
-                  Notes{" "}
-                  <span className="font-normal text-stone-400">(optional)</span>
-                </label>
-                <textarea
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  placeholder="Any additional context, photos to take, vendor info, etc."
-                  rows={2}
-                  className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-                />
-              </div>
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Description</label>
+              <textarea
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+                placeholder="What's the issue? Include any relevant details."
+                rows={3}
+                className="w-full resize-none rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              />
             </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
-              <button
-                onClick={() => { setShowIssueForm(false); setEditIssueIndex(null); }}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Type</label>
+              <select
+                value={formSeverity}
+                onChange={(e) => setFormSeverity(e.target.value as Issue["severity"])}
+                className="w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text focus:outline-none"
               >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveIssueForm}
-                disabled={!formTitle.trim() || !formDescription.trim() || formSaving}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {formSaving ? "Saving…" : issueFormMode === "add" ? "Add Issue" : "Save Changes"}
-              </button>
+                {SEVERITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">
+                Notes <span className="font-normal text-porch-text-tertiary">(optional)</span>
+              </label>
+              <textarea
+                value={formNotes}
+                onChange={(e) => setFormNotes(e.target.value)}
+                placeholder="Any additional context, photos to take, vendor info, etc."
+                rows={2}
+                className="w-full resize-none rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              />
             </div>
           </div>
-        </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => { setShowIssueForm(false); setEditIssueIndex(null); }}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveIssueForm}
+              disabled={!formTitle.trim() || !formDescription.trim() || formSaving}
+              className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {formSaving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {report && (
+        <ChatFAB
+          scope="section"
+          storageKey={`section_${slug}`}
+          title={`Ask About ${displayName}`}
+          placeholder={`Ask about ${displayName.toLowerCase()}...`}
+          emptyStateText="Ask about anything in this section — an issue, a fix, or what to tackle first."
+          context={{
+            sectionName: displayName,
+            sectionIssues: sortedIssues.map(({ issue }) => ({ title: issue.title, severity: issue.severity })),
+          }}
+        />
       )}
     </div>
   );
