@@ -6,21 +6,19 @@ import {
   sections,
   normalize,
   type Issue,
-  type ParsedReport,
   type CompletionRecord,
   type SectionConfig,
 } from "@/lib/sections";
 import { loadLatestReport, loadCompletions } from "@/lib/data";
+import Modal from "@/app/components/Modal";
+import { ChevronLeftIcon } from "@/app/components/icons";
 
-const SEVERITY: Record<
-  Issue["severity"],
-  { badge: string; label: string }
-> = {
-  safety: { badge: "bg-red-100 text-red-700", label: "Safety" },
-  repair: { badge: "bg-orange-100 text-orange-700", label: "Repair" },
-  maintenance: { badge: "bg-amber-100 text-amber-700", label: "Maintenance" },
-  improvement: { badge: "bg-blue-100 text-blue-700", label: "Improvement" },
-  fyi: { badge: "bg-stone-100 text-stone-500", label: "FYI" },
+const TYPE_LABEL: Record<Issue["severity"], string> = {
+  safety: "Safety",
+  repair: "Repair",
+  maintenance: "Maintenance",
+  improvement: "Improvement",
+  fyi: "FYI",
 };
 
 interface CompletedItem {
@@ -32,244 +30,225 @@ interface CompletedItem {
 
 function parseMidpoint(cost?: string | null): number | null {
   if (!cost) return null;
-  const nums = [...cost.matchAll(/[\d,]+/g)].map((m) =>
-    parseInt(m[0].replace(/,/g, ""), 10)
-  );
+  const nums = [...cost.matchAll(/[\d,]+/g)].map((m) => parseInt(m[0].replace(/,/g, ""), 10));
   if (nums.length < 2 || nums.some(isNaN)) return null;
   return Math.round((nums[0] + nums[1]) / 2);
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  return new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
 function formatDollars(n: number): string {
   return "$" + n.toLocaleString("en-US");
 }
 
+function savingsFor(item: CompletedItem): number | null {
+  if (item.record.completedBy !== "me") return null;
+  const pro = parseMidpoint(item.issue.costEstimatePro);
+  const diy = parseMidpoint(item.issue.costEstimateDIY);
+  return pro !== null && diy !== null ? pro - diy : null;
+}
+
+type Filter = "all" | "me" | "pro";
+
 export default function CompletedPage() {
   const [items, setItems] = useState<CompletedItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [search, setSearch] = useState("");
+  const [sectionFilter, setSectionFilter] = useState<string>("all");
+  const [showSavings, setShowSavings] = useState(false);
 
   useEffect(() => {
-    Promise.all([loadLatestReport(), loadCompletions()]).then(
-      ([report, completions]) => {
-        const result: CompletedItem[] = [];
+    Promise.all([loadLatestReport(), loadCompletions()]).then(([report, completions]) => {
+      const result: CompletedItem[] = [];
 
-        for (const [, record] of Object.entries(completions)) {
-          const section = sections.find((s) => s.slug === record.slug);
-          if (!section) continue;
+      for (const [, record] of Object.entries(completions)) {
+        const section = sections.find((s) => s.slug === record.slug);
+        if (!section) continue;
 
-          let issue: Issue | undefined;
-          if (report) {
-            const reportSection = report.sections.find(
-              (s) => normalize(s.name) === normalize(section.label)
-            );
-            issue = reportSection?.issues[record.issueIndex];
-          }
-
-          if (!issue) continue;
-          result.push({ issue, section, record, issueIndex: record.issueIndex });
+        let issue: Issue | undefined;
+        if (report) {
+          const reportSection = report.sections.find((s) => normalize(s.name) === normalize(section.label));
+          issue = reportSection?.issues[record.issueIndex];
         }
 
-        result.sort(
-          (a, b) =>
-            new Date(b.record.completedAt).getTime() -
-            new Date(a.record.completedAt).getTime()
-        );
-
-        setItems(result);
-        setLoaded(true);
+        if (!issue) continue;
+        result.push({ issue, section, record, issueIndex: record.issueIndex });
       }
-    );
+
+      result.sort((a, b) => new Date(b.record.completedAt).getTime() - new Date(a.record.completedAt).getTime());
+      setItems(result);
+      setLoaded(true);
+    });
   }, []);
 
   const total = items.length;
   const byMe = items.filter((x) => x.record.completedBy === "me").length;
-  const byPro = items.filter(
-    (x) => x.record.completedBy === "professional"
-  ).length;
+  const byPro = items.filter((x) => x.record.completedBy === "professional").length;
 
   let totalSavings: number | null = null;
   for (const item of items) {
-    if (item.record.completedBy !== "me") continue;
-    const pro = parseMidpoint(item.issue.costEstimatePro);
-    const diy = parseMidpoint(item.issue.costEstimateDIY);
-    if (pro !== null && diy !== null) {
-      totalSavings = (totalSavings ?? 0) + (pro - diy);
-    }
+    const s = savingsFor(item);
+    if (s !== null) totalSavings = (totalSavings ?? 0) + s;
   }
 
+  const usedSections = Array.from(new Set(items.map((x) => x.section.slug)));
+  const sectionChips = [
+    { slug: "all", label: "All" },
+    ...usedSections.map((slug) => ({ slug, label: sections.find((s) => s.slug === slug)?.label ?? slug })),
+  ];
+
+  const q = search.trim().toLowerCase();
+  const filtered = items.filter((x) => {
+    if (filter === "me" && x.record.completedBy !== "me") return false;
+    if (filter === "pro" && x.record.completedBy !== "professional") return false;
+    if (sectionFilter !== "all" && x.section.slug !== sectionFilter) return false;
+    if (q && !x.issue.title.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
   const groupedBySection = sections
-    .map((section) => ({
-      section,
-      items: items.filter((x) => x.section.slug === section.slug),
-    }))
+    .map((section) => ({ section, items: filtered.filter((x) => x.section.slug === section.slug) }))
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="text-sm text-stone-400 transition-colors hover:text-stone-600"
-            >
-              ← Dashboard
-            </Link>
-            <div className="h-4 w-px bg-stone-200" />
-            <h1 className="text-xl font-semibold tracking-tight text-stone-900">
-              Completed Fixes
-            </h1>
-          </div>
-        </div>
+    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-porch-border bg-porch-surface px-5 py-3.5">
+        <Link href="/" className="flex items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
+          <ChevronLeftIcon size={15} />
+          Dashboard
+        </Link>
+        <span className="h-4 w-px bg-porch-border" />
+        <span className="text-[15px] font-semibold text-porch-text">Completed Fixes</span>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-10 space-y-10">
-        {!loaded ? null : total === 0 ? (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-10 text-center">
-            <p className="text-sm text-stone-500">
-              No completed fixes yet.{" "}
-              <Link
-                href="/"
-                className="text-stone-700 underline underline-offset-2"
-              >
-                Go to the dashboard
-              </Link>{" "}
-              to start tracking repairs.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Summary */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[
-                { value: String(total), label: "Issues Fixed" },
-                { value: String(byMe), label: "Fixed by Me" },
-                { value: String(byPro), label: "Fixed by Professional" },
-                {
-                  value:
-                    totalSavings !== null
-                      ? `~${formatDollars(totalSavings)}`
-                      : "—",
-                  label: "Est. Savings",
-                },
-              ].map(({ value, label }) => (
-                <div
-                  key={label}
-                  className="rounded-lg border border-stone-200 bg-white px-5 py-4"
+      {!loaded ? null : total === 0 ? (
+        <div className="mx-5 mt-6 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+          <p className="text-sm text-porch-text-secondary">
+            No completed fixes yet.{" "}
+            <Link href="/" className="text-porch-accent underline underline-offset-2">
+              Go to the dashboard
+            </Link>{" "}
+            to start tracking repairs.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2.5 px-5 pb-1 pt-[18px]">
+            {(
+              [
+                { key: "all" as const, value: String(total), label: "Issues Fixed" },
+                { key: "me" as const, value: String(byMe), label: "Fixed by Me" },
+                { key: "pro" as const, value: String(byPro), label: "Fixed by a Pro" },
+              ]
+            ).map(({ key, value, label }) => {
+              const active = filter === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setFilter((f) => (f === key ? "all" : key))}
+                  className={`btn-press rounded-2xl border-[1.5px] p-4 text-left ${
+                    active ? "border-porch-accent bg-porch-accent-tint" : "border-porch-border bg-porch-surface"
+                  }`}
                 >
-                  <p className="text-2xl font-semibold tracking-tight text-stone-900">
+                  <div className={`font-display text-2xl font-semibold ${active ? "text-porch-accent" : "text-porch-text"}`}>
                     {value}
-                  </p>
-                  <p className="mt-1 text-xs text-stone-400">{label}</p>
-                </div>
-              ))}
-            </div>
+                  </div>
+                  <div className={`mt-0.5 text-[12.5px] ${active ? "text-porch-accent-tint-text" : "text-porch-text-secondary"}`}>
+                    {label}
+                  </div>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setShowSavings(true)}
+              className="btn-press rounded-2xl border-[1.5px] border-porch-border bg-porch-surface p-4 text-left"
+            >
+              <div className="font-display text-2xl font-semibold text-porch-accent">
+                {totalSavings !== null ? `~${formatDollars(totalSavings)}` : "—"}
+              </div>
+              <div className="mt-0.5 text-[12.5px] text-porch-text-secondary">Est. Savings</div>
+            </button>
+          </div>
 
-            {/* Sections */}
-            {groupedBySection.map(({ section, items: sectionItems }) => (
-              <div key={section.slug}>
-                <div className="mb-3 flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-stone-900">
-                    {section.label}
-                  </h2>
-                  <span className="text-xs text-stone-400">
-                    {sectionItems.length} fix
-                    {sectionItems.length !== 1 ? "es" : ""}
+          <div className="px-5 pb-0 pt-[18px]">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search completed fixes..."
+              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            />
+            <div className="flex gap-2 overflow-x-auto pb-0.5 pt-3">
+              {sectionChips.map((chip) => {
+                const active = sectionFilter === chip.slug;
+                return (
+                  <button
+                    key={chip.slug}
+                    onClick={() => setSectionFilter(chip.slug)}
+                    className={`btn-press shrink-0 whitespace-nowrap rounded-full border-[1.5px] px-3.5 py-[7px] text-[13px] font-semibold ${
+                      active ? "border-porch-accent bg-porch-accent text-white" : "border-porch-border-input bg-porch-surface text-[#6B5F55]"
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {groupedBySection.length === 0 ? (
+            <div className="px-5 pt-12 text-center text-sm text-porch-text-tertiary">
+              No completed fixes match that search or filter.
+            </div>
+          ) : (
+            groupedBySection.map(({ section, items: sectionItems }) => (
+              <div key={section.slug} className="px-5 pb-1 pt-4">
+                <div className="mb-2 flex items-baseline gap-2">
+                  <span className="text-[15.5px] font-semibold text-porch-text">{section.label}</span>
+                  <span className="text-[12.5px] text-porch-text-tertiary">
+                    {sectionItems.length} fix{sectionItems.length !== 1 ? "es" : ""}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {sectionItems.map((item) => {
-                    const style =
-                      SEVERITY[item.issue.severity] ?? SEVERITY.fyi;
-                    const savings =
-                      item.record.completedBy === "me"
-                        ? (() => {
-                            const pro = parseMidpoint(
-                              item.issue.costEstimatePro
-                            );
-                            const diy = parseMidpoint(
-                              item.issue.costEstimateDIY
-                            );
-                            return pro !== null && diy !== null
-                              ? pro - diy
-                              : null;
-                          })()
-                        : null;
-
+                    const savings = savingsFor(item);
                     return (
                       <Link
                         key={`${item.section.slug}-${item.issueIndex}`}
                         href={`/section/${item.section.slug}/issue/${item.issueIndex}?from=completed`}
-                        className="block rounded-lg border border-stone-200 bg-white px-5 py-4 transition-opacity hover:opacity-75"
+                        className="block rounded-2xl border border-porch-border bg-porch-surface px-[18px] py-4 no-underline"
                       >
-                        <div className="mb-3 flex items-start justify-between gap-4">
-                          <span className="text-sm font-medium text-stone-900">
-                            {item.issue.title}
-                          </span>
-                          <span
-                            className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}
-                          >
-                            {style.label}
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-[15px] font-semibold leading-snug text-porch-text">{item.issue.title}</span>
+                          <span className="shrink-0 whitespace-nowrap rounded-full bg-porch-accent-tint px-2.5 py-[3px] text-[11.5px] font-semibold text-[#6B5F55]">
+                            {TYPE_LABEL[item.issue.severity]}
                           </span>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
-                          <div className="flex gap-2">
-                            <span className="text-stone-400">Fixed by</span>
-                            <span className="text-stone-700">
-                              {item.record.completedBy === "me"
-                                ? "Me"
-                                : "A Professional"}
-                            </span>
-                          </div>
-
-                          {item.record.completedBy === "me" &&
-                            item.record.difficulty != null && (
-                              <div className="flex gap-2">
-                                <span className="text-stone-400">
-                                  Difficulty
-                                </span>
-                                <span className="text-stone-700">
-                                  {item.record.difficulty}/5
-                                </span>
-                              </div>
-                            )}
-
-                          <div className="flex gap-2">
-                            <span className="text-stone-400">Completed</span>
-                            <span className="text-stone-700">
-                              {formatDate(item.record.completedAt)}
-                            </span>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <span className="text-stone-400">DIY</span>
-                            <span className="text-stone-700">
-                              {item.issue.costEstimateDIY ?? "—"}
-                            </span>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <span className="text-stone-400">Pro</span>
-                            <span className="text-stone-700">
-                              {item.issue.costEstimatePro ?? "—"}
-                            </span>
-                          </div>
-
+                        <div className="mt-2.5 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
+                          <span>
+                            Fixed by{" "}
+                            <strong className="font-semibold text-porch-text">
+                              {item.record.completedBy === "me" ? "Me" : "A Professional"}
+                            </strong>
+                          </span>
+                          <span>
+                            Completed <strong className="font-semibold text-porch-text">{formatDate(item.record.completedAt)}</strong>
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
+                          <span>
+                            DIY <strong className="font-semibold text-porch-text">{item.issue.costEstimateDIY ?? "—"}</strong>
+                          </span>
+                          <span>
+                            Pro <strong className="font-semibold text-porch-text">{item.issue.costEstimatePro ?? "—"}</strong>
+                          </span>
                           {savings !== null && (
-                            <div className="flex gap-2">
-                              <span className="text-stone-400">Est. saved</span>
-                              <span className="font-medium text-stone-700">
-                                ~{formatDollars(savings)}
-                              </span>
-                            </div>
+                            <span>
+                              Saved <strong className="font-semibold text-porch-accent">~{formatDollars(savings)}</strong>
+                            </span>
                           )}
                         </div>
                       </Link>
@@ -277,10 +256,30 @@ export default function CompletedPage() {
                   })}
                 </div>
               </div>
-            ))}
-          </>
-        )}
-      </main>
+            ))
+          )}
+        </>
+      )}
+
+      {showSavings && (
+        <Modal onClose={() => setShowSavings(false)} maxWidth={420} maxHeight="75vh">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="font-display text-lg font-semibold text-porch-text">Estimated Savings</span>
+          </div>
+          <p className="mb-3.5 text-[13px] text-porch-text-secondary">What doing it yourself saved you, fix by fix.</p>
+          {items.map((item) => {
+            const savings = savingsFor(item);
+            return (
+              <div key={`${item.section.slug}-${item.issueIndex}`} className="flex items-center justify-between gap-3 border-t border-[#ECE0D8] py-3">
+                <span className="text-sm leading-snug text-porch-text">{item.issue.title}</span>
+                <span className="shrink-0 text-[14.5px] font-semibold text-porch-accent">
+                  {savings !== null ? `~${formatDollars(savings)}` : "—"}
+                </span>
+              </div>
+            );
+          })}
+        </Modal>
+      )}
     </div>
   );
 }
