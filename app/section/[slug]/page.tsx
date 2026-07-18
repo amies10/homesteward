@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   sections,
   normalize,
@@ -55,8 +56,10 @@ export default function SectionPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  const router = useRouter();
   const { slug } = use(params);
 
+  const [selectedIssueIndex, setSelectedIssueIndex] = useState<number | null>(null);
   const [report, setReport]           = useState<ParsedReport | null>(null);
   const [completions, setCompletions] = useState<Record<string, CompletionRecord>>({});
   const [ignored, setIgnored]         = useState<Record<string, true>>({});
@@ -130,6 +133,12 @@ export default function SectionPage({
 
   const activeCount  = sortedIssues.filter((x) => !x.done && !x.isIgnored).length;
   const doneCount    = sortedIssues.filter((x) => x.done).length;
+
+  function navigateToIssue(issueIndex: number) {
+    if (selectedIssueIndex !== null) return;
+    setSelectedIssueIndex(issueIndex);
+    setTimeout(() => router.push(`/section/${slug}/issue/${issueIndex}`), 300);
+  }
 
   async function handleIgnore(i: number) {
     setIgnored((prev) => ({ ...prev, [`${slug}-${i}`]: true }));
@@ -301,10 +310,15 @@ export default function SectionPage({
                 style={{ opacity: dimmed ? 0.5 : 1 }}
                 className="relative rounded-2xl border border-porch-border bg-porch-surface px-[18px] py-4 shadow-[0_1px_2px_rgba(38,34,32,0.03)]"
               >
+                {selectedIssueIndex === i && <div className="comet-ring" />}
                 {issue.severity === "safety" && !dimmed && (
                   <span className="absolute left-[-1px] top-4 h-[22px] w-1 rounded-r-[3px] bg-porch-urgent" />
                 )}
-                <Link href={`/section/${slug}/issue/${i}`} className="block text-inherit no-underline">
+                <a
+                  href={`/section/${slug}/issue/${i}`}
+                  onClick={(e) => { e.preventDefault(); navigateToIssue(i); }}
+                  className="block text-inherit no-underline"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <span className="text-[15px] font-semibold leading-snug text-porch-text">{issue.title}</span>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
@@ -324,7 +338,7 @@ export default function SectionPage({
                   {issue.notes && !dimmed && (
                     <p className="mt-1.5 text-xs italic leading-relaxed text-porch-text-tertiary">Note: {issue.notes}</p>
                   )}
-                </Link>
+                </a>
 
                 <div className="mt-3 flex items-center gap-2.5">
                   <span className="rounded-full border border-porch-border bg-porch-surface px-2.5 py-[3px] text-xs font-medium text-[#6B5F55]">
