@@ -23,6 +23,7 @@ export interface Issue {
   userAdded?: boolean;
   notes?: string;
   deleted?: boolean;
+  photoBase64?: string;
 }
 
 export interface ReportSection {

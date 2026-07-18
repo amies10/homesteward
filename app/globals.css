@@ -1,26 +1,88 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FAF7F2;
+  --foreground: #262220;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-porch-bg: #FAF7F2;
+  --color-porch-surface: #FFFFFF;
+  --color-porch-border: #ECE5DC;
+  --color-porch-border-input: #DCD3C6;
+  --color-porch-text: #262220;
+  --color-porch-text-secondary: #857A6D;
+  --color-porch-text-tertiary: #A99C8B;
+  --color-porch-text-faint: #B8AC9D;
+
+  --color-porch-accent: #7D234A;
+  --color-porch-accent-hover: #5A1836;
+  --color-porch-accent-tint: #F4EBEF;
+  --color-porch-accent-tint-text: #8A4A61;
+
+  --color-porch-success: #3E7A4F;
+  --color-porch-success-bg: #EAF3EC;
+  --color-porch-success-border: #CFE3D4;
+
+  --color-porch-urgent: #B5432E;
+
+  --color-porch-pro-text: #6B4A2E;
+  --color-porch-pro-bg: #F1E9DE;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-display: Georgia, 'Times New Roman', serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: #7d234a33;
+}
+
+a {
+  color: #7D234A;
+}
+a:hover {
+  color: #5A1836;
+}
+
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes comet-spin {
+  to {
+    --angle: 360deg;
+  }
+}
+
+.comet-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from var(--angle), transparent 0deg, transparent 265deg, #7D234A 300deg, #B85E86 325deg, #F3D9E4 340deg, transparent 355deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: comet-spin 1.6s linear infinite;
+  pointer-events: none;
+  --angle: 0deg;
+}
+
+.btn-press {
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.btn-press:active {
+  transform: scale(0.96);
+  filter: brightness(0.94);
 }
