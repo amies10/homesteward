@@ -51,7 +51,13 @@ ${existingBriefing}
 The homeowner has this additional context or feedback:
 "${feedback}"
 
-Revise the briefing to incorporate their feedback. Keep the same format: plain prose, short paragraphs, no bullet lists, 200–350 words. Return only the revised briefing text.`
+Revise the briefing to incorporate their feedback. Keep the same format: four sections, each starting with a "### " markdown header using exactly these titles, each followed by one short plain-prose paragraph (no bullet lists):
+### What the contractor will assess and do
+### Questions to ask before hiring
+### What a proper repair looks like
+### Red flags to watch for
+
+Return only the revised briefing text.`
       : `Write a contractor briefing for the following home inspection issue. This is for a homeowner to read before hiring and meeting with a professional.
 
 Issue: ${issueTitle}
@@ -59,14 +65,13 @@ Description: ${issueDescription}
 Severity: ${severity}
 Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nTypical equipment involved: ${equipmentSpecs.join(", ")}` : ""}${costEstimatePro ? `\nEstimated professional cost: ${costEstimatePro}` : ""}${observationLine}
 
-Write a briefing in plain prose (no JSON) that covers:
-1. What the contractor will need to assess and do
-2. Questions the homeowner should ask before hiring
-3. What a proper repair looks like (so they can verify quality)
-4. Red flags to watch out for (signs of an unqualified contractor or a botched job)
-5. Any permits or inspections typically required
+Write the briefing as exactly four sections, each starting with a "### " markdown header using exactly these titles, each followed by one short plain-prose paragraph (no bullet lists, no sub-headers):
+### What the contractor will assess and do
+### Questions to ask before hiring
+### What a proper repair looks like
+### Red flags to watch for
 
-Keep it practical and direct — 200 to 350 words. Use short paragraphs, no bullet lists.`;
+Mention permits or inspections where relevant within those sections rather than as a separate one. Keep it practical and direct — 220 to 380 words total.`;
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",

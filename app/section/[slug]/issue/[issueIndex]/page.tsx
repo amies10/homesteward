@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import MarkdownProse from "@/app/components/MarkdownProse";
 import MicButton from "@/app/components/MicButton";
+import Modal from "@/app/components/Modal";
+import ChatFAB from "@/app/components/ChatFAB";
+import { ChevronDownIcon, ChevronLeftIcon, SettingsIcon } from "@/app/components/icons";
 import {
   sections,
   normalize,
@@ -27,12 +30,12 @@ import {
   updateReport,
 } from "@/lib/data";
 
-const SEVERITY: Record<Issue["severity"], { badge: string; label: string }> = {
-  safety:      { badge: "bg-red-100 text-red-700",      label: "Safety" },
-  repair:      { badge: "bg-orange-100 text-orange-700", label: "Repair" },
-  maintenance: { badge: "bg-amber-100 text-amber-700",   label: "Maintenance" },
-  improvement: { badge: "bg-blue-100 text-blue-700",     label: "Improvement" },
-  fyi:         { badge: "bg-stone-100 text-stone-500",   label: "FYI" },
+const TYPE_LABEL: Record<Issue["severity"], string> = {
+  safety: "Safety",
+  repair: "Repair",
+  maintenance: "Maintenance",
+  improvement: "Improvement",
+  fyi: "FYI",
 };
 
 export default function IssuePage({
@@ -61,6 +64,8 @@ export default function IssuePage({
   const [generatingExpert, setGeneratingExpert] = useState(false);
   const [expertError, setExpertError] = useState<string | null>(null);
   const [contractorType, setContractorType] = useState<string | null>(null);
+  const [contacted, setContacted] = useState<Record<number, boolean>>({});
+  const [briefingOpen, setBriefingOpen] = useState(true);
 
   const [showRefineBriefingModal, setShowRefineBriefingModal] = useState(false);
   const [refineBriefingFeedback, setRefineBriefingFeedback] = useState("");
@@ -83,7 +88,6 @@ export default function IssuePage({
   const [difficulty, setDifficulty] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
 
-  // Move to section
   const [moveTarget, setMoveTarget] = useState("");
   const [moving, setMoving] = useState(false);
 
@@ -114,7 +118,6 @@ export default function IssuePage({
     } catch {}
   }, [slug, index]);
 
-  // Derived section + issue
   const reportSection = report?.sections.find(
     (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
   );
@@ -125,23 +128,21 @@ export default function IssuePage({
 
   if (loaded && !reportSection && !sectionConfig) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50">
-        <p className="text-sm text-stone-500">Section not found.</p>
+      <div className="flex min-h-screen items-center justify-center bg-porch-bg">
+        <p className="text-sm text-porch-text-secondary">Section not found.</p>
       </div>
     );
   }
 
   if (loaded && !issue) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50">
-        <p className="text-sm text-stone-500">Issue not found.</p>
+      <div className="flex min-h-screen items-center justify-center bg-porch-bg">
+        <p className="text-sm text-porch-text-secondary">Issue not found.</p>
       </div>
     );
   }
 
   if (!issue) return null;
-
-  const style = SEVERITY[issue.severity] ?? SEVERITY.fyi;
 
   const isProOnly = !issue.costEstimateDIY;
   const hasSkillMismatch =
@@ -159,7 +160,6 @@ export default function IssuePage({
   const hasDiyPlan = !!(issueDetails?.materialsList?.length || issueDetails?.stepByStepPlan?.length);
   const hasExpertGuide = !!issueDetails?.contractorBriefing;
 
-  // All sections we can move to (exclude current)
   const moveTargetOptions: Array<{ slug: string; label: string }> = [
     ...sections
       .filter((s) => s.slug !== slug)
@@ -433,7 +433,6 @@ export default function IssuePage({
     setMoving(true);
     const newReport: ParsedReport = JSON.parse(JSON.stringify(report));
 
-    // Soft-delete source
     const srcIdx = newReport.sections.findIndex(
       (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
     );
@@ -444,7 +443,6 @@ export default function IssuePage({
       };
     }
 
-    // Push copy to target
     const targetConfig = sections.find((s) => s.slug === moveTarget);
     const dstIdx = newReport.sections.findIndex(
       (s) =>
@@ -470,82 +468,77 @@ export default function IssuePage({
   }
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="flex items-center gap-4">
-            <Link
-              href={from === "completed" ? "/completed" : `/section/${slug}`}
-              className="shrink-0 text-sm text-stone-400 transition-colors hover:text-stone-600"
-            >
-              ← {from === "completed" ? "Completed Fixes" : sectionDisplayName}
-            </Link>
-            <div className="h-4 w-px bg-stone-200" />
-            <div className="flex min-w-0 items-center gap-3">
-              <h1 className="truncate text-xl font-semibold tracking-tight text-stone-900">
-                {issue.title}
-              </h1>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}>
-                {style.label}
-              </span>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-porch-border bg-porch-surface px-5 py-[18px]">
+        <Link
+          href={from === "completed" ? "/completed" : `/section/${slug}`}
+          className="flex min-w-0 items-center gap-1.5 text-[14px] text-porch-text-secondary no-underline"
+        >
+          <ChevronLeftIcon />
+          <span className="truncate">{from === "completed" ? "Completed Fixes" : sectionDisplayName}</span>
+        </Link>
+        <Link href="/settings" aria-label="Settings" className="flex shrink-0 items-center justify-center p-1">
+          <SettingsIcon />
+        </Link>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-4 px-6 py-10">
+      <div className="px-5 pb-1.5 pt-[22px]">
+        <div className="flex flex-wrap items-start gap-2.5">
+          <span className="font-display text-[23px] font-semibold leading-tight text-porch-text">{issue.title}</span>
+          <span className="shrink-0 rounded-full border border-porch-border bg-porch-surface px-2.5 py-[3px] text-xs font-medium text-[#6B5F55]">
+            {TYPE_LABEL[issue.severity]}
+          </span>
+        </div>
+      </div>
+
+      <main className="space-y-2.5 px-5 pt-2.5">
         {/* Inspection notes */}
-        <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
-            Inspection Notes
-          </p>
-          <p className="text-sm leading-relaxed text-stone-700">{issue.description}</p>
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Inspection notes</p>
+          {issue.photoBase64 && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={issue.photoBase64} alt="" className="mt-2.5 max-h-48 rounded-xl object-cover" />
+          )}
+          <p className="mt-2 text-[14px] leading-relaxed text-[#3A3532]">{issue.description}</p>
           {issue.notes && (
-            <p className="mt-3 text-xs italic leading-relaxed text-stone-400">
-              Note: {issue.notes}
-            </p>
+            <p className="mt-3 text-xs italic leading-relaxed text-porch-text-tertiary">Note: {issue.notes}</p>
           )}
         </div>
 
         {/* Your observations */}
-        <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
-            Your Observations
-          </p>
-          <p className="mb-3 text-xs leading-relaxed text-stone-500">
-            Describe what you&apos;re actually seeing in your own words. Mention any brands, models, or details not captured in the inspection notes. Don&apos;t worry about being precise — just say it all and we&apos;ll take care of the rest.
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Your observations</p>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-porch-text-secondary">
+            Tell us what you&apos;re actually seeing, in your own words — brand, model, anything the report missed.
+            No need to be precise, we&apos;ll sort it out.
           </p>
 
           {issueDetails?.userObservation && !observationExpanded ? (
-            <div>
-              <p className="text-sm leading-relaxed text-stone-700">
-                {issueDetails.userObservation}
-              </p>
+            <div className="mt-3 border-t border-[#F2EBE1] pt-3">
+              <p className="text-[14px] leading-relaxed text-[#3A3532]">{issueDetails.userObservation}</p>
               <button
                 onClick={() => {
                   setObservationDraft(issueDetails.userObservation ?? "");
                   setObservationExpanded(true);
                 }}
-                className="mt-2 text-xs text-stone-400 underline underline-offset-2 hover:text-stone-600"
+                className="mt-2 text-xs text-porch-text-tertiary underline underline-offset-2"
               >
                 Edit
               </button>
             </div>
           ) : observationExpanded ? (
-            <div className="space-y-3">
+            <div className="mt-2.5">
               <textarea
                 value={observationDraft}
                 onChange={(e) => setObservationDraft(e.target.value)}
-                placeholder=""
+                placeholder="e.g. it's the mechanical kind, not a push-button..."
                 rows={4}
                 autoFocus
-                className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
+                className="w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3 py-2.5 text-sm leading-relaxed text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
               />
-              <div className="flex items-center justify-between gap-2">
+              <div className="mt-2.5 flex items-center justify-between gap-2">
                 <MicButton
-                  onTranscript={(t) =>
-                    setObservationDraft((prev) => (prev ? `${prev} ${t}` : t))
-                  }
+                  onTranscript={(t) => setObservationDraft((prev) => (prev ? `${prev} ${t}` : t))}
                   disabled={polishingObservation}
                 />
                 <div className="flex items-center gap-2">
@@ -556,230 +549,217 @@ export default function IssuePage({
                       setPolishError(null);
                     }}
                     disabled={polishingObservation}
-                    className="text-xs text-stone-400 hover:text-stone-600 disabled:opacity-50"
+                    className="text-xs text-porch-text-tertiary disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handlePolishObservation}
                     disabled={!observationDraft.trim() || polishingObservation}
-                    className="rounded-md border border-stone-800 bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-press rounded-[8px] border-none bg-porch-accent px-4 py-2 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {polishingObservation ? "Saving…" : "Polish & Save"}
+                    {polishingObservation ? "Saving…" : "Save"}
                   </button>
                 </div>
               </div>
-              {polishError && (
-                <p className="text-xs text-red-600">{polishError}</p>
-              )}
+              {polishError && <p className="mt-1.5 text-xs text-red-600">{polishError}</p>}
             </div>
           ) : (
             <button
               onClick={() => setObservationExpanded(true)}
-              className="text-xs text-stone-400 hover:text-stone-600"
+              className="btn-press mt-2.5 flex items-center gap-1.5 border-none bg-transparent p-0 text-[13.5px] font-semibold text-porch-accent"
             >
               + Add your observations
             </button>
           )}
         </div>
 
-        {/* Cost option cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* DIY card */}
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-stone-400">
-                Fix It Yourself
+        {/* Fix It Yourself */}
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+          <div className="flex items-center justify-between gap-2.5">
+            <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Fix it yourself</p>
+            {withinSkill && (
+              <span className="rounded-full bg-porch-success-bg px-2.5 py-[3px] text-[11.5px] font-semibold text-porch-success">
+                Within your skill level
+              </span>
+            )}
+          </div>
+          <p className="mt-2.5 font-display text-[26px] font-semibold text-porch-text">{issue.costEstimateDIY ?? "—"}</p>
+
+          {showDiyWarning ? (
+            <div className="mt-2.5 space-y-2.5">
+              <p className="rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700">
+                {isProOnly
+                  ? "This repair is typically recommended for a licensed professional. Proceeding yourself carries risk."
+                  : "This repair typically requires more experience than your current level. We recommend calling a professional."}
               </p>
-              {withinSkill && (
-                <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                  Within your skill level
+              <button
+                onClick={() => setDiyUnlocked(true)}
+                className="text-xs text-porch-text-secondary underline underline-offset-2"
+              >
+                I understand, show me anyway
+              </button>
+            </div>
+          ) : hasDiyPlan ? (
+            <div className="mt-1.5 space-y-2">
+              <p className="text-[13.5px] text-porch-text-secondary">
+                ✓ DIY plan ready — {issueDetails?.materialsList?.length ?? 0} materials, {issueDetails?.stepByStepPlan?.length ?? 0} steps
+              </p>
+              <Link
+                href={`/section/${slug}/issue/${index}/diy`}
+                className="btn-press inline-block rounded-[10px] border-none bg-porch-accent px-4 py-2 text-[13.5px] font-semibold text-white no-underline"
+              >
+                View Full Walkthrough →
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-2.5 space-y-2.5">
+              <p className="text-[13.5px] leading-relaxed text-porch-text-secondary">
+                We&apos;ll put together a materials list and a step-by-step plan, sized to your skill level.
+              </p>
+              {diyError && <p className="text-xs text-red-600">{diyError}</p>}
+              <button
+                onClick={handleGenerateDiy}
+                disabled={generatingDiy}
+                className="btn-press w-full rounded-[10px] border-none bg-porch-accent py-3 text-[14.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {generatingDiy ? "Generating…" : "Generate DIY Plan"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Call an Expert */}
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Call an expert</p>
+          <p className="mt-2.5 font-display text-[26px] font-semibold text-porch-text">{issue.costEstimatePro ?? "—"}</p>
+
+          {hasExpertGuide ? (
+            <div className="mt-2.5">
+              <p className="mb-2.5 text-[13.5px] leading-relaxed text-porch-text-secondary">
+                Get a briefing on what a proper fix looks like, questions to ask, and red flags to watch for.
+              </p>
+              <button
+                onClick={() => { setShowRefineBriefingModal(true); setRefineBriefingError(null); }}
+                className="btn-press mb-3 w-full rounded-[10px] border-[1.5px] border-porch-accent bg-porch-surface py-2.5 text-[13.5px] font-semibold text-porch-accent"
+              >
+                Refine This Briefing
+              </button>
+              <button
+                onClick={() => setBriefingOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2.5 border-none bg-transparent p-0"
+              >
+                <span className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">
+                  Contractor Briefing
                 </span>
+                <ChevronDownIcon style={{ transform: briefingOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s ease" }} />
+              </button>
+              {briefingOpen && (
+                <div className="mt-3.5">
+                  <MarkdownProse text={issueDetails!.contractorBriefing!} />
+                </div>
               )}
             </div>
-            <p className="mb-3 text-2xl font-semibold tracking-tight text-stone-900">
-              {issue.costEstimateDIY ?? "—"}
-            </p>
-
-            {showDiyWarning ? (
-              <div className="space-y-3">
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700">
-                  {isProOnly
-                    ? "This repair is typically recommended for a licensed professional. Proceeding yourself carries risk."
-                    : "This repair typically requires more experience than your current level. We recommend calling a professional."}
+          ) : (
+            <div className="mt-2.5 space-y-2.5">
+              <p className="text-[13.5px] leading-relaxed text-porch-text-secondary">
+                Get a contractor briefing with questions to ask, red flags to watch for, and what a proper repair
+                looks like — plus help finding someone nearby.
+              </p>
+              {!userLocation && (
+                <p className="text-xs text-porch-text-tertiary">
+                  Add your location in{" "}
+                  <a href="/settings" className="text-porch-accent underline underline-offset-2">
+                    Settings
+                  </a>{" "}
+                  to also find local contractors.
                 </p>
-                <button
-                  onClick={() => setDiyUnlocked(true)}
-                  className="text-xs text-stone-500 underline underline-offset-2 hover:text-stone-700"
-                >
-                  I understand, show me anyway
-                </button>
-              </div>
-            ) : hasDiyPlan ? (
-              <div className="space-y-2">
-                <p className="text-xs text-stone-500">
-                  ✓ DIY plan ready —{" "}
-                  {issueDetails?.materialsList?.length ?? 0} materials,{" "}
-                  {issueDetails?.stepByStepPlan?.length ?? 0} steps
-                </p>
-                <Link
-                  href={`/section/${slug}/issue/${index}/diy`}
-                  className="inline-block rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50"
-                >
-                  View Full Walkthrough →
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs leading-relaxed text-stone-500">
-                  Generate a detailed materials list and step-by-step repair plan.
-                </p>
-                {diyError && (
-                  <p className="text-xs text-red-600">{diyError}</p>
-                )}
-                <button
-                  onClick={handleGenerateDiy}
-                  disabled={generatingDiy}
-                  className="rounded-md border border-stone-800 bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {generatingDiy ? "Generating…" : "Generate DIY Plan"}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Expert card */}
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-stone-400">
-              Call an Expert
-            </p>
-            <p className="mb-3 text-2xl font-semibold tracking-tight text-stone-900">
-              {issue.costEstimatePro ?? "—"}
-            </p>
-
-            {hasExpertGuide ? (
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-stone-700">Contractor Briefing</p>
-                <MarkdownProse text={issueDetails!.contractorBriefing!} />
-                <button
-                  onClick={() => { setShowRefineBriefingModal(true); setRefineBriefingError(null); }}
-                  className="mt-1 text-xs text-stone-400 underline underline-offset-2 hover:text-stone-600"
-                >
-                  Refine This Briefing
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs leading-relaxed text-stone-500">
-                  Get a contractor briefing with questions to ask, red flags to watch for, and what a proper repair looks like.
-                </p>
-                {!userLocation && (
-                  <p className="text-xs text-stone-400">
-                    Add your location in{" "}
-                    <a href="/settings" className="underline underline-offset-2 hover:text-stone-600">
-                      Settings
-                    </a>{" "}
-                    to also find local contractors.
-                  </p>
-                )}
-                {expertError && (
-                  <p className="text-xs text-red-600">{expertError}</p>
-                )}
-                <button
-                  onClick={handleGenerateExpert}
-                  disabled={generatingExpert}
-                  className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {generatingExpert
-                    ? "Generating…"
-                    : userLocation
-                    ? "Get Expert Guide & Find Contractors"
-                    : "Get Expert Guide"}
-                </button>
-              </div>
-            )}
-          </div>
+              )}
+              {expertError && <p className="text-xs text-red-600">{expertError}</p>}
+              <button
+                onClick={handleGenerateExpert}
+                disabled={generatingExpert}
+                className="btn-press w-full rounded-[10px] border-[1.5px] border-porch-accent bg-porch-surface py-3 text-[14.5px] font-semibold text-porch-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {generatingExpert ? "Generating…" : userLocation ? "Get Expert Guide & Find Pros" : "Get Expert Guide"}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Local contractors */}
         {contractors.length > 0 && (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <div className="mb-4 flex items-baseline justify-between gap-4">
-              <p className="text-sm font-semibold text-stone-900">Local Contractors</p>
-              {contractorType && (
-                <span className="text-xs text-stone-400 capitalize">{contractorType}</span>
-              )}
+          <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+            <div className="mb-3.5 flex items-baseline justify-between gap-4">
+              <p className="text-[15.5px] font-semibold text-porch-text">Find Contractors Near You</p>
+              {contractorType && <span className="text-xs capitalize text-porch-text-tertiary">{contractorType}</span>}
             </div>
-            <div className="space-y-3">
-              {contractors.map((c, i) => (
-                <div
-                  key={i}
-                  className="rounded-md border border-stone-100 bg-stone-50 px-4 py-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-stone-900">{c.name}</p>
-                      <p className="mt-0.5 text-xs text-stone-500">{c.address}</p>
-                      {c.phone && (
-                        <a
-                          href={`tel:${c.phone}`}
-                          className="mt-0.5 block text-xs text-stone-600 hover:text-stone-900"
-                        >
-                          {c.phone}
-                        </a>
-                      )}
+            <div className="space-y-2.5">
+              {contractors.map((c, i) => {
+                const isContacted = !!contacted[i];
+                const initial = c.name.trim().charAt(0).toUpperCase();
+                return (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3.5 rounded-2xl border border-porch-border bg-porch-surface px-[18px] py-4"
+                  >
+                    <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full bg-porch-accent-tint font-display text-[15px] font-bold text-porch-accent">
+                      {initial}
                     </div>
-                    <div className="shrink-0 text-right">
-                      {c.rating !== undefined && (
-                        <div className="flex items-center justify-end gap-1">
-                          <span className="text-sm font-medium text-stone-800">
-                            {c.rating.toFixed(1)}
-                          </span>
-                          <span className="text-amber-400">★</span>
-                          {c.reviewCount !== undefined && (
-                            <span className="text-xs text-stone-400">({c.reviewCount.toLocaleString()})</span>
-                          )}
-                        </div>
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14.5px] font-semibold text-porch-text">{c.name}</p>
+                      <p className="mt-0.5 text-[12.5px] text-porch-text-secondary">
+                        {c.rating !== undefined ? `${c.rating.toFixed(1)} stars` : c.address}
+                        {c.reviewCount !== undefined && ` (${c.reviewCount.toLocaleString()})`}
+                      </p>
                       <a
                         href={c.mapsUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-1.5 block text-xs text-stone-500 underline underline-offset-2 hover:text-stone-700"
+                        className="mt-0.5 block text-xs text-porch-text-secondary underline underline-offset-2"
                       >
                         View on Google Maps
                       </a>
                     </div>
+                    <button
+                      onClick={() => setContacted((prev) => ({ ...prev, [i]: true }))}
+                      disabled={isContacted}
+                      className={`btn-press shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-semibold ${
+                        isContacted
+                          ? "border-porch-accent bg-porch-accent-tint text-porch-accent"
+                          : "border-porch-border-input bg-porch-surface text-porch-text"
+                      }`}
+                    >
+                      {isContacted ? "Requested" : "Contact"}
+                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
         {/* Move to section */}
         {!saved && moveTargetOptions.length > 0 && (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-400">
+          <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+            <p className="mb-3 text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">
               Move to Section
             </p>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <select
                 value={moveTarget}
                 onChange={(e) => setMoveTarget(e.target.value)}
-                className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 focus:border-stone-500 focus:outline-none"
+                className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text focus:outline-none"
               >
                 <option value="">Select a section…</option>
                 {moveTargetOptions.map((opt) => (
-                  <option key={opt.slug} value={opt.slug}>
-                    {opt.label}
-                  </option>
+                  <option key={opt.slug} value={opt.slug}>{opt.label}</option>
                 ))}
               </select>
               <button
                 onClick={handleMoveIssue}
                 disabled={!moveTarget || moving}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2.5 text-sm font-semibold text-porch-text disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {moving ? "Moving…" : "Move"}
               </button>
@@ -788,207 +768,190 @@ export default function IssuePage({
         )}
 
         {/* Mark as complete */}
-        <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-          {saved ? (
-            <p className="text-sm text-stone-500">✓ Marked as complete.</p>
-          ) : !showForm ? (
-            <button
-              onClick={() => setShowForm(true)}
-              className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
-            >
-              Mark as Complete
-            </button>
-          ) : (
-            <div className="space-y-5">
+        {saved ? (
+          <div className="flex items-center justify-center gap-2 rounded-2xl border border-porch-success-border bg-porch-success-bg p-[14px] text-sm font-semibold text-porch-success">
+            ✓ Marked as complete
+          </div>
+        ) : !showForm ? (
+          <button
+            onClick={() => setShowForm(true)}
+            className="btn-press flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-porch-border-input bg-transparent p-[14px] text-sm font-medium text-[#6B5F55]"
+          >
+            ✓ Mark as complete
+          </button>
+        ) : (
+          <div className="space-y-5 rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-porch-text">Who fixed this?</p>
+              <div className="flex gap-2">
+                {(
+                  [
+                    { value: "me", label: "Me" },
+                    { value: "professional", label: "A Professional" },
+                  ] as const
+                ).map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => { setCompletedBy(value); setDifficulty(null); }}
+                    className={`btn-press rounded-[10px] border px-4 py-2 text-sm font-semibold ${
+                      completedBy === value
+                        ? "border-porch-accent bg-porch-accent text-white"
+                        : "border-porch-border-input bg-porch-surface text-porch-text"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {completedBy === "me" && (
               <div className="space-y-2">
-                <p className="text-sm font-medium text-stone-900">Who fixed this?</p>
+                <p className="text-sm font-semibold text-porch-text">How difficult was it?</p>
                 <div className="flex gap-2">
-                  {(
-                    [
-                      { value: "me", label: "Me" },
-                      { value: "professional", label: "A Professional" },
-                    ] as const
-                  ).map(({ value, label }) => (
+                  {[1, 2, 3, 4, 5].map((n) => (
                     <button
-                      key={value}
-                      onClick={() => {
-                        setCompletedBy(value);
-                        setDifficulty(null);
-                      }}
-                      className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        completedBy === value
-                          ? "border-stone-800 bg-stone-900 text-white"
-                          : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+                      key={n}
+                      onClick={() => setDifficulty(n)}
+                      className={`btn-press h-9 w-9 rounded-[10px] border text-sm font-semibold ${
+                        difficulty === n
+                          ? "border-porch-accent bg-porch-accent text-white"
+                          : "border-porch-border-input bg-porch-surface text-porch-text"
                       }`}
                     >
-                      {label}
+                      {n}
                     </button>
                   ))}
                 </div>
+                <p className="text-xs text-porch-text-tertiary">1 = Easy, 5 = Very Difficult</p>
               </div>
+            )}
 
-              {completedBy === "me" && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-stone-900">How difficult was it?</p>
-                  <div className="flex gap-2">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <button
-                        key={n}
-                        onClick={() => setDifficulty(n)}
-                        className={`h-9 w-9 rounded-md border text-sm font-medium transition-colors ${
-                          difficulty === n
-                            ? "border-stone-800 bg-stone-900 text-white"
-                            : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-stone-400">1 = Easy, 5 = Very Difficult</p>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSave}
-                  disabled={!completedBy || (completedBy === "me" && difficulty === null)}
-                  className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => {
-                    setShowForm(false);
-                    setCompletedBy(null);
-                    setDifficulty(null);
-                  }}
-                  className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </main>
-
-      {showRefineBriefingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="border-b border-stone-100 px-6 py-4">
-              <p className="text-sm font-semibold text-stone-900">Refine This Briefing</p>
-              <p className="mt-0.5 text-xs text-stone-400">
-                Add more details about what you&apos;re seeing to get a more accurate briefing.
-              </p>
-            </div>
-            <div className="px-6 py-5">
-              <textarea
-                value={refineBriefingFeedback}
-                onChange={(e) => setRefineBriefingFeedback(e.target.value)}
-                placeholder="e.g. The issue is more severe than described — there's visible water damage around the area. I'm in an older home built in 1965. The contractor mentioned it may involve asbestos."
-                rows={5}
-                autoFocus
-                className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-              />
-              <div className="mt-1.5 flex items-center justify-between">
-                <span />
-                <MicButton
-                  onTranscript={(t) => setRefineBriefingFeedback((prev) => prev ? `${prev} ${t}` : t)}
-                  disabled={refiningBriefing}
-                />
-              </div>
-              {refineBriefingError && (
-                <p className="mt-1 text-xs text-red-600">{refineBriefingError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
+            <div className="flex gap-2">
               <button
-                onClick={() => { setShowRefineBriefingModal(false); setRefineBriefingFeedback(""); setRefineBriefingError(null); }}
-                disabled={refiningBriefing}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
+                onClick={handleSave}
+                disabled={!completedBy || (completedBy === "me" && difficulty === null)}
+                className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => { setShowForm(false); setCompletedBy(null); setDifficulty(null); }}
+                className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleRefineBriefing}
-                disabled={!refineBriefingFeedback.trim() || refiningBriefing}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {refiningBriefing ? "Regenerating…" : "Regenerate Briefing"}
-              </button>
             </div>
           </div>
-        </div>
+        )}
+      </main>
+
+      {showRefineBriefingModal && (
+        <Modal onClose={() => { setShowRefineBriefingModal(false); setRefineBriefingFeedback(""); setRefineBriefingError(null); }} maxWidth={420}>
+          <p className="text-[15px] font-semibold text-porch-text">Refine This Briefing</p>
+          <p className="mt-1 text-xs text-porch-text-tertiary">
+            Add more details about what you&apos;re seeing to get a more accurate briefing.
+          </p>
+          <textarea
+            value={refineBriefingFeedback}
+            onChange={(e) => setRefineBriefingFeedback(e.target.value)}
+            placeholder="e.g. it's worse after long showers, and I'm in an older home built in 1965..."
+            rows={5}
+            autoFocus
+            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          />
+          <div className="mt-1.5 flex items-center justify-end">
+            <MicButton
+              onTranscript={(t) => setRefineBriefingFeedback((prev) => (prev ? `${prev} ${t}` : t))}
+              disabled={refiningBriefing}
+            />
+          </div>
+          {refineBriefingError && <p className="mt-1 text-xs text-red-600">{refineBriefingError}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => { setShowRefineBriefingModal(false); setRefineBriefingFeedback(""); setRefineBriefingError(null); }}
+              disabled={refiningBriefing}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRefineBriefing}
+              disabled={!refineBriefingFeedback.trim() || refiningBriefing}
+              className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {refiningBriefing ? "Regenerating…" : "Regenerate Briefing"}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {showRegenDiyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="px-6 py-5">
-              <p className="text-sm font-semibold text-stone-900">
-                Regenerate DIY Plan?
-              </p>
-              <p className="mt-2 text-sm leading-relaxed text-stone-600">
-                You already have a DIY plan for this issue. Would you like to regenerate it using your new observations?
-              </p>
-              {regenError && (
-                <p className="mt-3 text-xs text-red-600">{regenError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
-              <button
-                onClick={advanceToExpertModal}
-                disabled={regenDiyLoading}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
-              >
-                Keep Existing Plan
-              </button>
-              <button
-                onClick={handleRegenDiy}
-                disabled={regenDiyLoading}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {regenDiyLoading ? "Regenerating…" : "Yes, Regenerate"}
-              </button>
-            </div>
+        <Modal maxWidth={420}>
+          <p className="text-sm font-semibold text-porch-text">Regenerate DIY Plan?</p>
+          <p className="mt-2 text-sm leading-relaxed text-porch-text-secondary">
+            You already have a DIY plan for this issue. Would you like to regenerate it using your new observations?
+          </p>
+          {regenError && <p className="mt-3 text-xs text-red-600">{regenError}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={advanceToExpertModal}
+              disabled={regenDiyLoading}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary disabled:opacity-50"
+            >
+              Keep Existing Plan
+            </button>
+            <button
+              onClick={handleRegenDiy}
+              disabled={regenDiyLoading}
+              className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {regenDiyLoading ? "Regenerating…" : "Yes, Regenerate"}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showRegenExpertModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="px-6 py-5">
-              <p className="text-sm font-semibold text-stone-900">
-                Regenerate Contractor Briefing?
-              </p>
-              <p className="mt-2 text-sm leading-relaxed text-stone-600">
-                Would you like to regenerate your contractor briefing with these new observations?
-              </p>
-              {regenError && (
-                <p className="mt-3 text-xs text-red-600">{regenError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
-              <button
-                onClick={() => setShowRegenExpertModal(false)}
-                disabled={regenExpertLoading}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
-              >
-                Keep Existing
-              </button>
-              <button
-                onClick={handleRegenExpert}
-                disabled={regenExpertLoading}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {regenExpertLoading ? "Regenerating…" : "Yes, Regenerate"}
-              </button>
-            </div>
+        <Modal maxWidth={420}>
+          <p className="text-sm font-semibold text-porch-text">Regenerate Contractor Briefing?</p>
+          <p className="mt-2 text-sm leading-relaxed text-porch-text-secondary">
+            Would you like to regenerate your contractor briefing with these new observations?
+          </p>
+          {regenError && <p className="mt-3 text-xs text-red-600">{regenError}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => setShowRegenExpertModal(false)}
+              disabled={regenExpertLoading}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary disabled:opacity-50"
+            >
+              Keep Existing
+            </button>
+            <button
+              onClick={handleRegenExpert}
+              disabled={regenExpertLoading}
+              className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {regenExpertLoading ? "Regenerating…" : "Yes, Regenerate"}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
+
+      <ChatFAB
+        scope="issue"
+        storageKey={`issue_${slug}_${index}`}
+        title="Ask About This Issue"
+        placeholder="Ask about this issue..."
+        emptyStateText="Ask anything about this repair — I know the report and your skill level."
+        context={{
+          issueTitle: issue.title,
+          issueDescription: issue.description,
+          issueSeverity: issue.severity,
+          skillLevel: userSkillLevel ?? undefined,
+          location: userLocation ?? undefined,
+        }}
+      />
     </div>
   );
 }
