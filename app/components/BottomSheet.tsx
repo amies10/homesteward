@@ -6,6 +6,7 @@ interface Props {
   collapsedHeight?: number;
   expandedHeight?: number;
   handleLabel?: React.ReactNode;
+  persistentContent?: React.ReactNode;
   children: React.ReactNode;
   zIndex?: number;
   position?: "fixed" | "absolute";
@@ -20,6 +21,7 @@ export default function BottomSheet({
   collapsedHeight = 96,
   expandedHeight,
   handleLabel,
+  persistentContent,
   children,
   zIndex = 30,
   position = "fixed",
@@ -82,6 +84,7 @@ export default function BottomSheet({
         className="flex shrink-0 flex-col items-center gap-2.5 pt-2.5"
       >
         <span className="h-1 w-9 rounded-full bg-porch-border-input" />
+        {persistentContent}
         {expanded && handleLabel}
       </div>
 

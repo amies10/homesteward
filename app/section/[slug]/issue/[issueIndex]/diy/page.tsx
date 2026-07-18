@@ -12,6 +12,10 @@ import {
 } from "@/lib/sections";
 import { loadLatestReport, loadIssueDetails, saveIssueDetails } from "@/lib/data";
 import MicButton from "@/app/components/MicButton";
+import Modal from "@/app/components/Modal";
+import BottomSheet from "@/app/components/BottomSheet";
+import AssistantAvatar from "@/app/components/AssistantAvatar";
+import { CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
 
 export default function DIYPage({
   params,
@@ -22,21 +26,12 @@ export default function DIYPage({
   const index = parseInt(issueIndex, 10);
   const sectionConfig = sections.find((s) => s.slug === slug);
 
-  const [issue, setIssue] = useState<
-    ParsedReport["sections"][0]["issues"][0] | null
-  >(null);
+  const [issue, setIssue] = useState<ParsedReport["sections"][0]["issues"][0] | null>(null);
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
-  const [checkedMaterials, setCheckedMaterials] = useState<
-    Record<number, boolean>
-  >({});
   const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
   const [chatMessages, setChatMessages] = useState<StoredChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
-  const [pendingImage, setPendingImage] = useState<{
-    base64: string;
-    mimeType: string;
-    previewUrl: string;
-  } | null>(null);
+  const [pendingImage, setPendingImage] = useState<{ base64: string; mimeType: string; previewUrl: string } | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
@@ -45,16 +40,34 @@ export default function DIYPage({
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
 
+  const [materialsOpen, setMaterialsOpen] = useState(true);
+  const [stepsOpen, setStepsOpen] = useState(true);
+
+  const [workModeOpen, setWorkModeOpen] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [stepExpanded, setStepExpanded] = useState<Record<number, boolean>>({});
+  const [stepGenerating, setStepGenerating] = useState<Record<number, boolean>>({});
+  const [stepDetail, setStepDetail] = useState<Record<number, string>>({});
+  const [showCongrats, setShowCongrats] = useState(false);
+  const [cardDragDx, setCardDragDx] = useState(0);
+  const [cardDragging, setCardDragging] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(375);
+
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cardDragActive = useRef(false);
+  const cardStartX = useRef(0);
+  const cardMoved = useRef(false);
+
+  useEffect(() => {
+    setViewportWidth(window.innerWidth);
+  }, []);
 
   useEffect(() => {
     loadLatestReport().then((report) => {
       if (!report) return;
       const reportSection = report.sections.find(
-        (s) =>
-          s.slug === slug ||
-          (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
+        (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
       );
       setIssue(reportSection?.issues[index] ?? null);
     });
@@ -63,13 +76,10 @@ export default function DIYPage({
       if (details) setIssueDetails(details);
     });
 
-    const mKey = diyKey(slug, index, "materials");
     const sKey = diyKey(slug, index, "steps");
     const cKey = diyKey(slug, index, "chat");
 
     try {
-      const m = localStorage.getItem(mKey);
-      if (m) setCheckedMaterials(JSON.parse(m));
       const s = localStorage.getItem(sKey);
       if (s) setCheckedSteps(JSON.parse(s));
       const c = localStorage.getItem(cKey);
@@ -80,12 +90,6 @@ export default function DIYPage({
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, chatLoading]);
-
-  function toggleMaterial(i: number) {
-    const next = { ...checkedMaterials, [i]: !checkedMaterials[i] };
-    setCheckedMaterials(next);
-    localStorage.setItem(diyKey(slug, index, "materials"), JSON.stringify(next));
-  }
 
   function toggleStep(i: number) {
     const next = { ...checkedSteps, [i]: !checkedSteps[i] };
@@ -99,12 +103,7 @@ export default function DIYPage({
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(",")[1];
-      setPendingImage({
-        base64,
-        mimeType: file.type,
-        previewUrl: dataUrl,
-      });
+      setPendingImage({ base64: dataUrl.split(",")[1], mimeType: file.type, previewUrl: dataUrl });
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -124,10 +123,7 @@ export default function DIYPage({
 
     const updatedMessages = [...chatMessages, userMsg];
     setChatMessages(updatedMessages);
-    localStorage.setItem(
-      diyKey(slug, index, "chat"),
-      JSON.stringify(updatedMessages)
-    );
+    localStorage.setItem(diyKey(slug, index, "chat"), JSON.stringify(updatedMessages));
     setInputText("");
     setPendingImage(null);
     setChatLoading(true);
@@ -156,14 +152,9 @@ export default function DIYPage({
 
       const withReply = [...updatedMessages, assistantMsg];
       setChatMessages(withReply);
-      localStorage.setItem(
-        diyKey(slug, index, "chat"),
-        JSON.stringify(withReply)
-      );
+      localStorage.setItem(diyKey(slug, index, "chat"), JSON.stringify(withReply));
     } catch (err) {
-      setChatError(
-        err instanceof Error ? err.message : "Failed to get response"
-      );
+      setChatError(err instanceof Error ? err.message : "Failed to get response");
     } finally {
       setChatLoading(false);
     }
@@ -197,9 +188,9 @@ export default function DIYPage({
       };
       setIssueDetails(updated);
       await saveIssueDetails(slug, index, updated);
-      setCheckedMaterials({});
       setCheckedSteps({});
-      localStorage.removeItem(diyKey(slug, index, "materials"));
+      setStepExpanded({});
+      setStepDetail({});
       localStorage.removeItem(diyKey(slug, index, "steps"));
       setShowRefineModal(false);
       setRefineFeedback("");
@@ -210,316 +201,473 @@ export default function DIYPage({
     }
   }
 
+  async function requestStepDetail(i: number, stepText: string) {
+    if (stepExpanded[i] || !issue) return;
+    setStepGenerating((prev) => ({ ...prev, [i]: true }));
+    try {
+      const res = await fetch("/api/elaborate-step", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issueTitle: issue.title,
+          issueDescription: issue.description,
+          stepText,
+          stepNumber: i + 1,
+          totalSteps: steps.length,
+        }),
+      });
+      const data = await res.json();
+      setStepDetail((prev) => ({ ...prev, [i]: res.ok ? data.detail : "Couldn't load more detail right now." }));
+      setStepExpanded((prev) => ({ ...prev, [i]: true }));
+    } catch {
+      setStepDetail((prev) => ({ ...prev, [i]: "Couldn't load more detail right now." }));
+      setStepExpanded((prev) => ({ ...prev, [i]: true }));
+    } finally {
+      setStepGenerating((prev) => ({ ...prev, [i]: false }));
+    }
+  }
+
+  function goToStep(i: number) {
+    const total = steps.length + 1;
+    setStepIndex(Math.max(0, Math.min(total - 1, i)));
+  }
+
+  function onCardPointerDown(e: React.PointerEvent) {
+    cardDragActive.current = true;
+    cardStartX.current = e.clientX;
+    cardMoved.current = false;
+    setCardDragging(true);
+    setCardDragDx(0);
+  }
+
+  function onCardPointerMove(e: React.PointerEvent) {
+    if (!cardDragActive.current) return;
+    const dx = e.clientX - cardStartX.current;
+    if (Math.abs(dx) > 6) cardMoved.current = true;
+    setCardDragDx(dx);
+  }
+
+  function onCardPointerUp() {
+    if (!cardDragActive.current) return;
+    cardDragActive.current = false;
+    const dx = cardDragDx;
+    const threshold = 60;
+    const total = steps.length + 1;
+    let next = stepIndex;
+    if (dx < -threshold && next < total - 1) next += 1;
+    else if (dx > threshold && next > 0) next -= 1;
+    setCardDragging(false);
+    setCardDragDx(0);
+    setStepIndex(next);
+  }
+
   const materials = issueDetails?.materialsList ?? [];
   const steps = issueDetails?.stepByStepPlan ?? [];
-  const materialsCheckedCount = materials.filter((_, i) => checkedMaterials[i]).length;
   const stepsCheckedCount = steps.filter((_, i) => checkedSteps[i]).length;
 
-  return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="flex items-center gap-4">
-            <Link
-              href={`/section/${slug}/issue/${index}`}
-              className="shrink-0 text-sm text-stone-400 transition-colors hover:text-stone-600"
+  const chatBody = (
+    <>
+      {chatMessages.length === 0 && !chatLoading && (
+        <p className="pt-6 text-center text-[13.5px] text-porch-text-faint">
+          No messages yet — ask below and I&apos;ll walk through it with you.
+        </p>
+      )}
+      <div className="space-y-3">
+        {chatMessages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div
+              className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                msg.role === "user"
+                  ? "border border-porch-border bg-porch-surface text-porch-text"
+                  : "border border-[#ECE0E6] bg-porch-accent-tint text-porch-text"
+              }`}
             >
-              ← {issue?.title ?? "Issue"}
-            </Link>
-            <div className="h-4 w-px bg-stone-200" />
-            <h1 className="text-xl font-semibold tracking-tight text-stone-900">
-              DIY Walkthrough
-            </h1>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl space-y-4 px-6 py-10">
-        {/* Materials */}
-        {materials.length > 0 && (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-sm font-semibold text-stone-900">
-                Materials &amp; Tools
-              </p>
-              <span className="text-xs text-stone-400">
-                {materialsCheckedCount}/{materials.length} gathered
-              </span>
+              {msg.imageBase64 && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`} alt="Uploaded" className="mb-2 max-h-48 rounded-lg object-contain" />
+              )}
+              {msg.text && <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>}
             </div>
-            <ul className="space-y-2">
-              {materials.map((m, i) => (
-                <li key={i}>
-                  <label className="flex cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={!!checkedMaterials[i]}
-                      onChange={() => toggleMaterial(i)}
-                      className="h-4 w-4 rounded border-stone-300 accent-stone-800"
-                    />
-                    <span
-                      className={`flex-1 text-sm ${
-                        checkedMaterials[i]
-                          ? "text-stone-400 line-through"
-                          : "text-stone-700"
-                      }`}
-                    >
-                      {m.item}
-                    </span>
-                    <span className="shrink-0 text-xs text-stone-400">
-                      {m.estimatedCost}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
+          </div>
+        ))}
+        {chatLoading && (
+          <div className="flex justify-start">
+            <div className="rounded-2xl border border-porch-border bg-porch-surface px-4 py-2.5">
+              <p className="text-sm text-porch-text-tertiary">Thinking…</p>
+            </div>
           </div>
         )}
+        {chatError && <p className="text-center text-xs text-red-500">{chatError}</p>}
+        <div ref={chatBottomRef} />
+      </div>
+    </>
+  );
 
-        {/* Steps */}
-        {steps.length > 0 && (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-sm font-semibold text-stone-900">
-                Step-by-Step Plan
-              </p>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => { setShowRefineModal(true); setRefineError(null); }}
-                  className="text-xs text-stone-400 underline underline-offset-2 hover:text-stone-600"
-                >
-                  Refine This Plan
-                </button>
-                <span className="text-xs text-stone-400">
-                  {stepsCheckedCount}/{steps.length} done
-                </span>
+  const chatInputRow = (
+    <div className="mt-2 flex-shrink-0 border-t border-[#F2EBE1] px-4 pb-[calc(10px+env(safe-area-inset-bottom))] pt-2.5">
+      {pendingImage && (
+        <div className="mb-2 flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={pendingImage.previewUrl} alt="Pending" className="h-12 w-12 rounded-lg object-cover" />
+          <button onClick={() => setPendingImage(null)} className="text-xs text-porch-text-tertiary">
+            Remove
+          </button>
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 rounded-full border border-porch-border bg-porch-bg py-1.5 pl-4 pr-1.5">
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+          placeholder="Ask about this repair..."
+          disabled={chatLoading}
+          className="flex-1 border-none bg-transparent text-[14.5px] text-porch-text outline-none placeholder:text-porch-text-tertiary disabled:opacity-50"
+        />
+        <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleImageSelect} />
+        <MicButton
+          onTranscript={(t) => setInputText((prev) => (prev ? `${prev} ${t}` : t))}
+          disabled={chatLoading}
+          className="!h-[34px] !w-[34px] !rounded-full !border-none !bg-porch-accent-tint !p-0"
+        />
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          disabled={chatLoading}
+          aria-label="Attach photo"
+          className="btn-press flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border-none bg-porch-accent-tint disabled:opacity-50"
+        >
+          <CameraIcon />
+        </button>
+        <button
+          onClick={sendMessage}
+          disabled={chatLoading || (!inputText.trim() && !pendingImage)}
+          aria-label="Send"
+          className="btn-press flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border-none bg-porch-accent disabled:opacity-50"
+        >
+          <SendIcon />
+        </button>
+      </div>
+    </div>
+  );
+
+  const baseTranslate = -(stepIndex * viewportWidth);
+  const liveTranslate = baseTranslate + (cardDragging ? cardDragDx : 0);
+
+  return (
+    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-porch-border bg-porch-surface px-5 py-2.5">
+        <Link href={`/section/${slug}/issue/${index}`} className="flex min-w-0 items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
+          <ChevronLeftIcon size={15} />
+          <span className="truncate">{issue?.title ?? "Issue"}</span>
+        </Link>
+        <Link href="/settings" aria-label="Settings" className="flex shrink-0 items-center p-1">
+          <SettingsIcon size={18} />
+        </Link>
+      </header>
+
+      <div className="sticky top-[42px] z-[9] flex items-center justify-between gap-3 border-b border-porch-border bg-porch-bg px-5 py-3.5">
+        <span className="font-display text-[21px] font-semibold text-porch-text">DIY Walkthrough</span>
+        <button
+          onClick={() => { setWorkModeOpen(true); setStepIndex(0); setShowCongrats(false); }}
+          disabled={steps.length === 0}
+          className="btn-press flex shrink-0 items-center gap-1.5 rounded-full border-none bg-porch-accent px-4 py-2.5 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlayIcon />
+          Enter Work Mode
+        </button>
+      </div>
+
+      <div className="px-5 pb-1 pt-2.5">
+        {materials.length > 0 && (
+          <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+            <button onClick={() => setMaterialsOpen((v) => !v)} className="flex w-full items-center justify-between gap-2.5 border-none bg-transparent p-0">
+              <span className="text-[15.5px] font-semibold text-porch-text">Materials &amp; Tools</span>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span className="text-[13px] text-porch-text-tertiary">{materials.length} items</span>
+                <ChevronDownIcon style={{ transform: materialsOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s ease" }} />
               </div>
-            </div>
-            <ol className="space-y-3">
-              {steps.map((step, i) => (
-                <li key={i}>
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={!!checkedSteps[i]}
-                      onChange={() => toggleStep(i)}
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 accent-stone-800"
-                    />
-                    <span
-                      className={`text-sm leading-relaxed ${
-                        checkedSteps[i]
-                          ? "text-stone-400 line-through"
-                          : "text-stone-700"
-                      }`}
+            </button>
+            {materialsOpen && (
+              <div>
+                {materials.map((m, i) => (
+                  <div key={i} className="flex items-center gap-3 border-t border-[#F2EBE1] py-2.5">
+                    <span className="flex-1 text-sm leading-relaxed text-porch-text">{m.item}</span>
+                    <span className="shrink-0 text-[13px] text-porch-text-tertiary">{m.estimatedCost}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="px-5 pb-1 pt-2.5">
+        {steps.length > 0 && (
+          <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+            <button onClick={() => setStepsOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 border-none bg-transparent p-0">
+              <span className="text-[15.5px] font-semibold text-porch-text">Step-by-Step Plan</span>
+              <div className="flex shrink-0 items-center gap-2.5">
+                <span className="text-[13px] text-porch-text-tertiary">{stepsCheckedCount}/{steps.length} done</span>
+                <ChevronDownIcon style={{ transform: stepsOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s ease" }} />
+              </div>
+            </button>
+            {stepsOpen && (
+              <>
+                <div className="mt-2.5 text-right">
+                  <button
+                    onClick={() => { setShowRefineModal(true); setRefineError(null); }}
+                    className="border-none bg-transparent p-0 text-[12.5px] font-semibold text-porch-accent underline"
+                  >
+                    Refine This Plan
+                  </button>
+                </div>
+                {steps.map((step, i) => {
+                  const done = !!checkedSteps[i];
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => toggleStep(i)}
+                      className="flex w-full items-start gap-3 border-t border-[#F2EBE1] py-3 text-left"
                     >
-                      {step}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ol>
+                      <span
+                        className={`mt-0.5 flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded-[6px] border-[1.5px] ${
+                          done ? "border-porch-accent bg-porch-accent" : "border-porch-border-input bg-porch-surface"
+                        }`}
+                      >
+                        {done && <CheckIcon size={12} strokeWidth={3} />}
+                      </span>
+                      <span className={`flex-1 text-sm leading-relaxed ${done ? "text-porch-text-tertiary line-through" : "text-[#3A3532]"}`}>
+                        <strong>Step {i + 1}:</strong> {step}
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
         )}
 
         {materials.length === 0 && steps.length === 0 && (
-          <div className="rounded-lg border border-stone-200 bg-white px-6 py-10 text-center">
-            <p className="text-sm text-stone-500">
+          <div className="rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+            <p className="text-sm text-porch-text-secondary">
               No DIY plan generated yet.{" "}
-              <Link
-                href={`/section/${slug}/issue/${index}`}
-                className="text-stone-700 underline underline-offset-2"
-              >
-                Go back and click "Generate DIY Plan"
+              <Link href={`/section/${slug}/issue/${index}`} className="text-porch-accent underline underline-offset-2">
+                Go back and click &quot;Generate DIY Plan&quot;
               </Link>{" "}
               to create one.
             </p>
           </div>
         )}
+      </div>
 
-        {/* Chat */}
-        <div className="rounded-lg border border-stone-200 bg-white">
-          <div className="border-b border-stone-100 px-6 py-4">
-            <p className="text-sm font-semibold text-stone-900">
-              Ask a Question
-            </p>
-            <p className="mt-0.5 text-xs text-stone-400">
-              Get expert guidance on this specific repair.
-            </p>
+      <div className="px-5 pb-[120px] pt-2.5">
+        <div className="flex items-center gap-3 rounded-2xl border border-[#ECE0D8] bg-gradient-to-br from-[#FBF3E9] to-[#F4EBEF] p-[18px]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-porch-accent">
+            <AssistantAvatar size={30} variant="bust" />
           </div>
-
-          {/* Message history */}
-          <div className="max-h-96 overflow-y-auto px-6 py-4">
-            {chatMessages.length === 0 && !chatLoading && (
-              <p className="text-center text-xs text-stone-400">
-                No messages yet. Ask a question below.
-              </p>
-            )}
-            <div className="space-y-3">
-              {chatMessages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-lg px-4 py-2.5 ${
-                      msg.role === "user"
-                        ? "bg-stone-900 text-white"
-                        : "border border-stone-200 bg-stone-50 text-stone-700"
-                    }`}
-                  >
-                    {msg.imageBase64 && (
-                      <img
-                        src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`}
-                        alt="Uploaded"
-                        className="mb-2 max-h-48 rounded object-contain"
-                      />
-                    )}
-                    {msg.text && (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {msg.text}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {chatLoading && (
-                <div className="flex justify-start">
-                  <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-2.5">
-                    <p className="text-sm text-stone-400">Thinking…</p>
-                  </div>
-                </div>
-              )}
-              {chatError && (
-                <p className="text-center text-xs text-red-500">{chatError}</p>
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-          </div>
-
-          {/* Input area */}
-          <div className="border-t border-stone-100 px-6 py-4">
-            {pendingImage && (
-              <div className="mb-2 flex items-center gap-2">
-                <img
-                  src={pendingImage.previewUrl}
-                  alt="Pending"
-                  className="h-12 w-12 rounded object-cover"
-                />
-                <button
-                  onClick={() => setPendingImage(null)}
-                  className="text-xs text-stone-400 hover:text-stone-600"
-                >
-                  Remove
-                </button>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder="Ask a question about this repair…"
-                disabled={chatLoading}
-                className="flex-1 rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none disabled:opacity-50"
-              />
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                onChange={handleImageSelect}
-              />
-              <MicButton
-                onTranscript={(t) => setInputText((prev) => prev ? `${prev} ${t}` : t)}
-                disabled={chatLoading}
-              />
-              <button
-                onClick={() => imageInputRef.current?.click()}
-                disabled={chatLoading}
-                title="Attach photo"
-                className="rounded-md border border-stone-300 bg-white px-3 py-2 text-stone-500 transition-colors hover:bg-stone-50 disabled:opacity-50"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                  <circle cx="9" cy="9" r="2" />
-                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                </svg>
-              </button>
-              <button
-                onClick={sendMessage}
-                disabled={chatLoading || (!inputText.trim() && !pendingImage)}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Send
-              </button>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14.5px] font-semibold text-porch-text">Got a question about this fix?</div>
+            <div className="mt-0.5 text-[13px] text-porch-text-secondary">
+              I know your report, your skill level, and this exact repair. Ask me anything, any time.
             </div>
           </div>
         </div>
-      </main>
+      </div>
+
+      <BottomSheet handleLabel={<div className="px-5 pb-0 pt-1 text-[13px] font-semibold text-[#6B5F55]">What&apos;s the issue?</div>}>
+        {chatBody}
+        {chatInputRow}
+      </BottomSheet>
 
       {showRefineModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="border-b border-stone-100 px-6 py-4">
-              <p className="text-sm font-semibold text-stone-900">Refine This Plan</p>
-              <p className="mt-0.5 text-xs text-stone-400">
-                Describe what you found or what isn&apos;t working with the current plan.
-              </p>
-            </div>
-            <div className="px-6 py-5">
-              <textarea
-                value={refineFeedback}
-                onChange={(e) => setRefineFeedback(e.target.value)}
-                placeholder="e.g. The shutoff valve isn't where the plan says. The tile I need to remove is larger than expected. I don't have a tile saw — what's the alternative?"
-                rows={5}
-                autoFocus
-                className="w-full resize-none rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
+        <Modal onClose={() => { setShowRefineModal(false); setRefineFeedback(""); setRefineError(null); }} maxWidth={420}>
+          <p className="text-[15px] font-semibold text-porch-text">Refine This Plan</p>
+          <p className="mt-1 text-xs text-porch-text-tertiary">
+            Describe what you found or what isn&apos;t working with the current plan.
+          </p>
+          <textarea
+            value={refineFeedback}
+            onChange={(e) => setRefineFeedback(e.target.value)}
+            placeholder="e.g. the shutoff valve isn't where the plan says, I don't have a tile saw..."
+            rows={5}
+            autoFocus
+            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          />
+          <div className="mt-1.5 flex items-center justify-end">
+            <MicButton onTranscript={(t) => setRefineFeedback((prev) => (prev ? `${prev} ${t}` : t))} disabled={refining} />
+          </div>
+          {refineError && <p className="mt-1 text-xs text-red-600">{refineError}</p>}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => { setShowRefineModal(false); setRefineFeedback(""); setRefineError(null); }}
+              disabled={refining}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRefine}
+              disabled={!refineFeedback.trim() || refining}
+              className="btn-press rounded-[10px] border-none bg-porch-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {refining ? "Regenerating…" : "Regenerate Plan"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {workModeOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-porch-bg">
+          <div className="flex shrink-0 items-center justify-between px-5 pb-1.5 pt-4">
+            <button
+              onClick={() => setWorkModeOpen(false)}
+              aria-label="Exit work mode"
+              className="btn-press flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-none bg-[#F1EAE1]"
+            >
+              <XIcon size={16} color="#6B5F55" />
+            </button>
+            <div className="text-center text-[14.5px] font-semibold text-porch-text">{issue?.title}</div>
+            <span className="w-9 shrink-0" />
+          </div>
+
+          <div className="flex shrink-0 flex-wrap justify-center gap-1.5 px-5 pb-1 pt-2.5">
+            {steps.map((_, i) => (
+              <span
+                key={i}
+                className="h-[7px] w-[7px] rounded-full"
+                style={{ background: i === stepIndex ? "#7D234A" : checkedSteps[i] ? "#D9BFCB" : "#E3DACD" }}
               />
-              <div className="mt-1.5 flex items-center justify-between">
-                <span />
-                <MicButton
-                  onTranscript={(t) => setRefineFeedback((prev) => prev ? `${prev} ${t}` : t)}
-                  disabled={refining}
-                />
+            ))}
+            <span className="h-[7px] w-[7px] rounded-full" style={{ background: stepIndex === steps.length ? "#7D234A" : "#E3DACD" }} />
+          </div>
+
+          <div
+            onPointerDown={onCardPointerDown}
+            onPointerMove={onCardPointerMove}
+            onPointerUp={onCardPointerUp}
+            style={{ touchAction: "pan-y" }}
+            className="relative flex-1 overflow-hidden"
+          >
+            <div
+              style={{
+                transform: `translateX(${liveTranslate}px)`,
+                transition: cardDragging ? "none" : "transform 0.32s cubic-bezier(0.2,0.8,0.2,1)",
+              }}
+              className="flex h-full"
+            >
+              {steps.map((stepText, i) => {
+                const done = !!checkedSteps[i];
+                const expanded = !!stepExpanded[i];
+                const generating = !!stepGenerating[i];
+                return (
+                  <div key={i} style={{ width: viewportWidth }} className="flex h-full shrink-0 flex-col px-4 pb-3.5 pt-2">
+                    <div className="flex flex-1 flex-col overflow-y-auto rounded-3xl border border-porch-border bg-porch-surface p-6 shadow-[0_2px_10px_rgba(38,34,32,0.05)]">
+                      <div className="flex shrink-0 items-start justify-between gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-porch-accent-tint font-display text-[17px] font-bold text-porch-accent">
+                          {i + 1}
+                        </div>
+                        <button
+                          onClick={() => toggleStep(i)}
+                          className={`btn-press flex shrink-0 items-center gap-1.5 rounded-full border-[1.5px] px-3.5 py-2.5 text-[13px] font-semibold ${
+                            done ? "border-porch-accent bg-porch-accent text-white" : "border-porch-border-input bg-porch-surface text-[#6B5F55]"
+                          }`}
+                        >
+                          {done && <CheckIcon size={13} strokeWidth={3} />}
+                          {done ? "Marked done" : "Mark step done"}
+                        </button>
+                      </div>
+                      <div className="mt-5">
+                        <div className="text-[19px] leading-[1.7] text-porch-text">{stepText}</div>
+                        {!expanded && !generating && (
+                          <button
+                            onClick={() => requestStepDetail(i, stepText)}
+                            className="mt-4 border-none bg-transparent p-0 text-sm font-semibold text-porch-accent underline"
+                          >
+                            Give me more detail
+                          </button>
+                        )}
+                        {generating && (
+                          <div className="mt-4 border-t border-[#F2EBE1] pt-4 text-sm italic text-porch-text-tertiary">
+                            Working on it…
+                          </div>
+                        )}
+                        {expanded && (
+                          <div className="mt-4 border-t border-[#F2EBE1] pt-4 text-[15px] leading-[1.7] text-[#6B5F55]">
+                            {stepDetail[i]}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ width: viewportWidth }} className="flex h-full shrink-0 flex-col px-4 pb-3.5 pt-2">
+                <div className="flex flex-1 flex-col items-center justify-center gap-5 rounded-3xl border border-porch-border bg-porch-surface p-6 text-center shadow-[0_2px_10px_rgba(38,34,32,0.05)]">
+                  <div className="font-display text-xl font-semibold text-porch-text">All steps done?</div>
+                  <div className="max-w-[280px] text-[14.5px] leading-relaxed text-porch-text-secondary">
+                    Tap the circle once you&apos;ve finished the repair.
+                  </div>
+                  <button
+                    onClick={() => setShowCongrats(true)}
+                    aria-label="Mark repair complete"
+                    className="btn-press flex h-[88px] w-[88px] items-center justify-center rounded-full border-none bg-porch-accent shadow-[0_6px_18px_rgba(125,35,74,0.35)]"
+                  >
+                    <CheckIcon size={40} strokeWidth={2.6} />
+                  </button>
+                </div>
               </div>
-              {refineError && (
-                <p className="mt-1 text-xs text-red-600">{refineError}</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
-              <button
-                onClick={() => { setShowRefineModal(false); setRefineFeedback(""); setRefineError(null); }}
-                disabled={refining}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRefine}
-                disabled={!refineFeedback.trim() || refining}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {refining ? "Regenerating…" : "Regenerate Plan"}
-              </button>
             </div>
           </div>
+
+          <div className="flex shrink-0 items-center justify-center gap-4.5 px-5 py-1">
+            <button onClick={() => goToStep(stepIndex - 1)} style={{ opacity: stepIndex === 0 ? 0.35 : 1 }} className="border-none bg-transparent p-2 text-[13px] font-medium text-porch-text-tertiary">
+              ← Previous
+            </button>
+            <button onClick={() => goToStep(stepIndex + 1)} style={{ opacity: stepIndex === steps.length ? 0.35 : 1 }} className="border-none bg-transparent p-2 text-[13px] font-medium text-porch-text-tertiary">
+              Next →
+            </button>
+          </div>
+
+          <BottomSheet
+            position="absolute"
+            zIndex={55}
+            collapsedHeight={152}
+            persistentContent={
+              <div className="flex w-full items-center gap-2.5 px-4 pb-2 pt-0.5">
+                <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-porch-accent">
+                  <AssistantAvatar size={22} variant="bust" />
+                </div>
+                <span className="flex-1 text-sm text-porch-text-secondary">Ask about this step…</span>
+              </div>
+            }
+          >
+            {chatBody}
+            {chatInputRow}
+          </BottomSheet>
+
+          {showCongrats && (
+            <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-4.5 bg-porch-bg p-8 text-center">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-porch-accent shadow-[0_6px_18px_rgba(125,35,74,0.35)]">
+                <CheckIcon size={36} strokeWidth={2.8} />
+              </div>
+              <div className="font-display text-[26px] font-semibold text-porch-text">Nice work.</div>
+              <div className="max-w-[300px] text-[15px] leading-relaxed text-porch-text-secondary">
+                That&apos;s one more thing taken care of. Your home&apos;s a little better off because of it.
+              </div>
+              <button
+                onClick={() => { setShowCongrats(false); setWorkModeOpen(false); }}
+                className="btn-press mt-2 rounded-full border-none bg-porch-accent px-7 py-3 text-[14.5px] font-semibold text-white"
+              >
+                Back to Repair
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
