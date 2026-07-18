@@ -9,8 +9,9 @@ import {
   type ParsedReport,
   type IssueDetails,
   type StoredChatMessage,
+  type CompletionRecord,
 } from "@/lib/sections";
-import { loadLatestReport, loadIssueDetails, saveIssueDetails } from "@/lib/data";
+import { loadLatestReport, loadIssueDetails, saveIssueDetails, saveCompletion } from "@/lib/data";
 import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
 import BottomSheet from "@/app/components/BottomSheet";
@@ -50,6 +51,8 @@ export default function DIYPage({
   const [stepGenerating, setStepGenerating] = useState<Record<number, boolean>>({});
   const [stepDetail, setStepDetail] = useState<Record<number, string>>({});
   const [showCongrats, setShowCongrats] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [finishPressed, setFinishPressed] = useState(false);
   const [cardDragDx, setCardDragDx] = useState(0);
   const [cardDragging, setCardDragging] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(375);
@@ -241,6 +244,26 @@ export default function DIYPage({
   function goToStep(i: number) {
     const total = steps.length + 1;
     setStepIndex(Math.max(0, Math.min(total - 1, i)));
+  }
+
+  // Same completion flow as "Mark as Complete" on the issue detail page
+  // (lib/data.ts saveCompletion — always resolves, falling back to
+  // localStorage-only if Supabase is unreachable, so no try/catch needed
+  // here either, matching that page). Work Mode's finish doesn't collect a
+  // difficulty rating, so completedBy is always "me" with no difficulty
+  // (both optional on CompletionRecord).
+  async function handleFinishRepair() {
+    if (finishing) return;
+    setFinishing(true);
+    const record: CompletionRecord = {
+      slug,
+      issueIndex: index,
+      completedBy: "me",
+      completedAt: new Date().toISOString(),
+    };
+    await saveCompletion(record);
+    setFinishing(false);
+    setShowCongrats(true);
   }
 
   function setCardDx(dx: number) {
@@ -729,11 +752,28 @@ export default function DIYPage({
                     Tap the circle once you&apos;ve finished the repair.
                   </div>
                   <button
-                    onClick={() => setShowCongrats(true)}
+                    onClick={handleFinishRepair}
+                    onPointerDown={() => setFinishPressed(true)}
+                    onPointerUp={() => setFinishPressed(false)}
+                    onPointerLeave={() => setFinishPressed(false)}
+                    onPointerCancel={() => setFinishPressed(false)}
+                    onTouchStart={() => setFinishPressed(true)}
+                    onTouchEnd={() => setFinishPressed(false)}
+                    onTouchCancel={() => setFinishPressed(false)}
+                    disabled={finishing}
                     aria-label="Mark repair complete"
-                    className="btn-press flex h-[88px] w-[88px] items-center justify-center rounded-full border-none bg-porch-accent shadow-[0_6px_18px_rgba(125,35,74,0.35)]"
+                    style={{
+                      transform: finishPressed ? "scale(0.96)" : "scale(1)",
+                      filter: finishPressed ? "brightness(0.94)" : "brightness(1)",
+                      transition: "transform 0.12s ease, filter 0.12s ease",
+                    }}
+                    className="flex h-[88px] w-[88px] items-center justify-center rounded-full border-none bg-porch-accent shadow-[0_6px_18px_rgba(125,35,74,0.35)] disabled:opacity-70"
                   >
-                    <CheckIcon size={40} strokeWidth={2.6} />
+                    {finishing ? (
+                      <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-white/40 border-t-white" />
+                    ) : (
+                      <CheckIcon size={40} strokeWidth={2.6} />
+                    )}
                   </button>
                 </div>
               </div>
