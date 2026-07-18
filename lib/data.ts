@@ -102,11 +102,20 @@ export async function loadIssueDetails(
           contractorBriefing: data.contractor_briefing ?? undefined,
           userObservation: data.user_observation ?? undefined,
         };
+        console.log("[data] loadIssueDetails: loaded from Supabase", { slug, issueIndex, hasDiyPlan: !!details.stepByStepPlan?.length });
         localStorage.setItem(issueDetailsKey(slug, issueIndex), JSON.stringify(details));
         return details;
       }
+      console.log("[data] loadIssueDetails: no Supabase row for this issue yet", { slug, issueIndex, reportId });
     } catch (err) {
-      console.warn("[data] loadIssueDetails: Supabase unavailable, falling back.", err);
+      const pgError = err as { code?: string; message?: string; details?: string; hint?: string };
+      console.error("[data] loadIssueDetails: Supabase query FAILED — falling back to localStorage.", {
+        code: pgError?.code,
+        message: pgError?.message,
+        details: pgError?.details,
+        hint: pgError?.hint,
+        raw: err,
+      });
     }
   }
 
@@ -126,27 +135,53 @@ export async function saveIssueDetails(
   localStorage.setItem(issueDetailsKey(slug, issueIndex), JSON.stringify(details));
 
   const reportId = localStorage.getItem(REPORT_ID_KEY);
-  if (!reportId) return;
+  if (!reportId) {
+    console.warn(
+      "[data] saveIssueDetails: no report_id in localStorage — the original report insert likely never reached Supabase, so this DIY plan will only be saved locally.",
+      { slug, issueIndex }
+    );
+    return;
+  }
 
   const userId = await getCurrentUserId();
-  try {
-    const { error } = await supabase.from("issue_details").upsert(
-      {
-        report_id: reportId,
-        section_slug: slug,
-        issue_index: issueIndex,
-        materials_list: details.materialsList ?? null,
-        step_by_step_plan: details.stepByStepPlan ?? null,
-        contractor_briefing: details.contractorBriefing ?? null,
-        user_observation: details.userObservation ?? null,
-        updated_at: new Date().toISOString(),
-        user_id: userId,
-      },
-      { onConflict: "report_id,section_slug,issue_index" }
+  if (!userId) {
+    console.warn(
+      "[data] saveIssueDetails: no authenticated user_id — RLS will reject this write, saving locally only.",
+      { slug, issueIndex, reportId }
     );
+    return;
+  }
+
+  const payload = {
+    report_id: reportId,
+    section_slug: slug,
+    issue_index: issueIndex,
+    materials_list: details.materialsList ?? null,
+    step_by_step_plan: details.stepByStepPlan ?? null,
+    contractor_briefing: details.contractorBriefing ?? null,
+    user_observation: details.userObservation ?? null,
+    updated_at: new Date().toISOString(),
+    user_id: userId,
+  };
+  console.log("[data] saveIssueDetails: upserting to Supabase", payload);
+
+  try {
+    const { data, error } = await supabase
+      .from("issue_details")
+      .upsert(payload, { onConflict: "report_id,section_slug,issue_index" })
+      .select("id, updated_at");
+
     if (error) throw error;
+    console.log("[data] saveIssueDetails: Supabase upsert succeeded", data);
   } catch (err) {
-    console.warn("[data] saveIssueDetails: Supabase unavailable, localStorage only.", err);
+    const pgError = err as { code?: string; message?: string; details?: string; hint?: string };
+    console.error("[data] saveIssueDetails: Supabase upsert FAILED — falling back to localStorage only.", {
+      code: pgError?.code,
+      message: pgError?.message,
+      details: pgError?.details,
+      hint: pgError?.hint,
+      raw: err,
+    });
   }
 }
 

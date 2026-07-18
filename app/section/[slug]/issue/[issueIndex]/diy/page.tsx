@@ -55,13 +55,21 @@ export default function DIYPage({
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cardContainerRef = useRef<HTMLDivElement>(null);
   const cardDragActive = useRef(false);
   const cardStartX = useRef(0);
   const cardMoved = useRef(false);
+  const cardDragDxRef = useRef(0);
+  const stepIndexRef = useRef(0);
+  const stepsLengthRef = useRef(0);
 
   useEffect(() => {
     setViewportWidth(window.innerWidth);
   }, []);
+
+  useEffect(() => {
+    stepIndexRef.current = stepIndex;
+  }, [stepIndex]);
 
   useEffect(() => {
     loadLatestReport().then((report) => {
@@ -232,38 +240,90 @@ export default function DIYPage({
     setStepIndex(Math.max(0, Math.min(total - 1, i)));
   }
 
-  function onCardPointerDown(e: React.PointerEvent) {
+  function setCardDx(dx: number) {
+    cardDragDxRef.current = dx;
+    setCardDragDx(dx);
+  }
+
+  function beginCardDrag(clientX: number) {
     cardDragActive.current = true;
-    cardStartX.current = e.clientX;
+    cardStartX.current = clientX;
     cardMoved.current = false;
     setCardDragging(true);
-    setCardDragDx(0);
+    setCardDx(0);
+  }
+
+  function updateCardDrag(clientX: number) {
+    if (!cardDragActive.current) return;
+    const dx = clientX - cardStartX.current;
+    if (Math.abs(dx) > 6) cardMoved.current = true;
+    setCardDx(dx);
+  }
+
+  function endCardDrag() {
+    if (!cardDragActive.current) return;
+    cardDragActive.current = false;
+    const dx = cardDragDxRef.current;
+    const threshold = 60;
+    const total = stepsLengthRef.current + 1;
+    let next = stepIndexRef.current;
+    if (dx < -threshold && next < total - 1) next += 1;
+    else if (dx > threshold && next > 0) next -= 1;
+    setCardDragging(false);
+    setCardDx(0);
+    setStepIndex(next);
+  }
+
+  function onCardPointerDown(e: React.PointerEvent) {
+    const target = e.target as Element;
+    try {
+      target.setPointerCapture?.(e.pointerId);
+    } catch {}
+    beginCardDrag(e.clientX);
   }
 
   function onCardPointerMove(e: React.PointerEvent) {
     if (!cardDragActive.current) return;
-    const dx = e.clientX - cardStartX.current;
-    if (Math.abs(dx) > 6) cardMoved.current = true;
-    setCardDragDx(dx);
+    e.preventDefault();
+    updateCardDrag(e.clientX);
   }
 
-  function onCardPointerUp() {
-    if (!cardDragActive.current) return;
-    cardDragActive.current = false;
-    const dx = cardDragDx;
-    const threshold = 60;
-    const total = steps.length + 1;
-    let next = stepIndex;
-    if (dx < -threshold && next < total - 1) next += 1;
-    else if (dx > threshold && next > 0) next -= 1;
-    setCardDragging(false);
-    setCardDragDx(0);
-    setStepIndex(next);
-  }
+  // Native (non-passive) touch fallback — see BottomSheet.tsx for why this
+  // is needed alongside Pointer Events for reliable mobile drag handling.
+  useEffect(() => {
+    const el = cardContainerRef.current;
+    if (!el) return;
+
+    function onTouchStart(e: TouchEvent) {
+      beginCardDrag(e.touches[0].clientX);
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (!cardDragActive.current) return;
+      const clientX = e.touches[0].clientX;
+      if (Math.abs(clientX - cardStartX.current) > 6) e.preventDefault();
+      updateCardDrag(clientX);
+    }
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", endCardDrag, { passive: true });
+    el.addEventListener("touchcancel", endCardDrag, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", endCardDrag);
+      el.removeEventListener("touchcancel", endCardDrag);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const materials = issueDetails?.materialsList ?? [];
   const steps = issueDetails?.stepByStepPlan ?? [];
   const stepsCheckedCount = steps.filter((_, i) => checkedSteps[i]).length;
+
+  useEffect(() => {
+    stepsLengthRef.current = steps.length;
+  }, [steps.length]);
 
   const chatBody = (
     <>
@@ -547,9 +607,11 @@ export default function DIYPage({
           </div>
 
           <div
+            ref={cardContainerRef}
             onPointerDown={onCardPointerDown}
             onPointerMove={onCardPointerMove}
-            onPointerUp={onCardPointerUp}
+            onPointerUp={endCardDrag}
+            onPointerCancel={endCardDrag}
             style={{ touchAction: "pan-y" }}
             className="relative flex-1 overflow-hidden"
           >
