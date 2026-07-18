@@ -5,6 +5,7 @@ import Link from "next/link";
 import { saveUserProfile, loadUserProfile } from "@/lib/data";
 import type { UserProfile } from "@/lib/sections";
 import { supabase } from "@/lib/supabase-client";
+import { CheckIcon, ChevronLeftIcon } from "@/app/components/icons";
 
 const SKILL_OPTIONS: Array<{
   value: UserProfile["skillLevel"];
@@ -60,110 +61,83 @@ export default function SettingsPage() {
     });
     setSaving(false);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    setTimeout(() => setSaved(false), 1800);
   }
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-2xl px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="text-sm text-stone-400 transition-colors hover:text-stone-600"
-              >
-                ← Dashboard
-              </Link>
-              <div className="h-4 w-px bg-stone-200" />
-              <h1 className="text-xl font-semibold tracking-tight text-stone-900">
-                Settings
-              </h1>
-            </div>
-            <button
-              onClick={() => supabase.auth.signOut()}
-              className="text-sm text-stone-400 transition-colors hover:text-stone-700"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-porch-border bg-porch-surface px-5 py-3.5">
+        <Link href="/" className="flex items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
+          <ChevronLeftIcon size={15} />
+          Dashboard
+        </Link>
+        <button onClick={() => supabase.auth.signOut()} className="border-none bg-transparent p-0 text-[13.5px] font-medium text-porch-text-secondary">
+          Sign out
+        </button>
       </header>
 
-      <main className="mx-auto max-w-2xl space-y-8 px-6 py-10">
-        {loaded && (
-          <>
-            <div>
-              <p className="mb-0.5 text-sm font-medium text-stone-900">
-                Skill Level
-              </p>
-              <p className="mb-4 text-xs text-stone-400">
-                How comfortable are you with home repairs?
-              </p>
-              <div className="space-y-2">
-                {SKILL_OPTIONS.map((opt) => {
-                  const selected = skillLevel === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      onClick={() => setSkillLevel(opt.value)}
-                      className={`w-full rounded-lg border px-5 py-4 text-left transition-colors ${
-                        selected
-                          ? "border-stone-800 bg-stone-900"
-                          : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
-                      }`}
-                    >
-                      <p
-                        className={`text-sm font-medium ${
-                          selected ? "text-white" : "text-stone-900"
-                        }`}
-                      >
-                        {opt.label}
-                      </p>
-                      <p
-                        className={`mt-0.5 text-xs leading-relaxed ${
-                          selected ? "text-stone-300" : "text-stone-500"
-                        }`}
-                      >
-                        {opt.description}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
+      <div className="px-5 pb-1 pt-5">
+        <span className="font-display text-[22px] font-semibold text-porch-text">Settings</span>
+      </div>
+
+      {loaded && (
+        <>
+          <div className="px-5 pb-1 pt-[18px]">
+            <div className="text-[15.5px] font-semibold text-porch-text">Skill Level</div>
+            <div className="mt-0.5 text-[13.5px] text-porch-text-secondary">
+              How comfortable are you with home repairs?
             </div>
 
-            <div>
-              <p className="mb-0.5 text-sm font-medium text-stone-900">
-                Location
-              </p>
-              <p className="mb-3 text-xs text-stone-400">
-                Used to find local contractors and estimate repair costs.
-              </p>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="Zip code or city, state"
-                className="w-full rounded-lg border border-stone-300 px-4 py-3 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-              />
+            <div className="space-y-2.5">
+              {SKILL_OPTIONS.map((opt) => {
+                const selected = skillLevel === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setSkillLevel(opt.value)}
+                    className={`btn-press mt-2.5 w-full rounded-2xl border-[1.5px] px-4 py-[15px] text-left ${
+                      selected ? "border-porch-accent bg-porch-accent" : "border-porch-border bg-porch-surface"
+                    }`}
+                  >
+                    <div className={`text-[15px] font-semibold ${selected ? "text-white" : "text-porch-text"}`}>
+                      {opt.label}
+                    </div>
+                    <div className={`mt-[3px] text-[13px] leading-relaxed ${selected ? "text-[#F1D9E1]" : "text-porch-text-secondary"}`}>
+                      {opt.description}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+          </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleSave}
-                disabled={!skillLevel || !location.trim() || saving}
-                className="rounded-md border border-stone-800 bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {saving ? "Saving…" : "Save Changes"}
-              </button>
-              {saved && (
-                <span className="text-sm text-stone-500">✓ Saved</span>
-              )}
+          <div className="px-5 pb-1 pt-[26px]">
+            <div className="text-[15.5px] font-semibold text-porch-text">Location</div>
+            <div className="mb-2.5 mt-0.5 text-[13.5px] text-porch-text-secondary">
+              Used to find local pros and estimate repair costs.
             </div>
-          </>
-        )}
-      </main>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="ZIP code"
+              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            />
+          </div>
+
+          <div className="px-5 pt-[26px]">
+            <button
+              onClick={handleSave}
+              disabled={!skillLevel || !location.trim() || saving}
+              className="btn-press flex w-full items-center justify-center gap-2 rounded-[10px] border-none py-[13px] text-[15px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              style={{ background: saved ? "#3E7A4F" : "#7D234A" }}
+            >
+              {saved && <CheckIcon size={16} strokeWidth={2.6} />}
+              {saving ? "Saving…" : saved ? "Saved" : "Save Changes"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
