@@ -590,6 +590,7 @@ export default function DIYPage({
       </div>
 
       <BottomSheet
+        collapsedHeight={34}
         handleLabel={<div className="px-5 pb-0 pt-1 text-[13px] font-semibold text-[#6B5F55]">What&apos;s the issue?</div>}
         footer={chatInputRow}
       >
