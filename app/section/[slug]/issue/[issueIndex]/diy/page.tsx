@@ -59,6 +59,8 @@ export default function DIYPage({
   const cardContainerRef = useRef<HTMLDivElement>(null);
   const cardDragActive = useRef(false);
   const cardStartX = useRef(0);
+  const cardStartY = useRef(0);
+  const cardAxis = useRef<"none" | "x" | "y">("none");
   const cardMoved = useRef(false);
   const cardDragDxRef = useRef(0);
   const stepIndexRef = useRef(0);
@@ -246,24 +248,21 @@ export default function DIYPage({
     setCardDragDx(dx);
   }
 
-  function beginCardDrag(clientX: number) {
-    cardDragActive.current = true;
-    cardStartX.current = clientX;
-    cardMoved.current = false;
-    setCardDragging(true);
-    setCardDx(0);
-  }
-
   function updateCardDrag(clientX: number) {
-    if (!cardDragActive.current) return;
     const dx = clientX - cardStartX.current;
     if (Math.abs(dx) > 6) cardMoved.current = true;
     setCardDx(dx);
   }
 
   function endCardDrag() {
-    if (!cardDragActive.current) return;
+    const wasHorizontal = cardDragActive.current && cardAxis.current === "x";
     cardDragActive.current = false;
+    cardAxis.current = "none";
+    if (!wasHorizontal) {
+      setCardDragging(false);
+      setCardDx(0);
+      return;
+    }
     const dx = cardDragDxRef.current;
     // Navigate once the drag passes ~30% of the visible card width. Read the
     // width live from the DOM so it stays correct after an orientation change.
@@ -279,15 +278,21 @@ export default function DIYPage({
   }
 
   // Pointer events handle mouse/pen only. Touch is handled exclusively by the
-  // native (non-passive) touch listeners in the effect below — running both for
-  // a single finger gesture would double-process it on browsers that fire both.
+  // native listeners in the effect below — running both for a single finger
+  // gesture would double-process it on browsers that fire both. Mouse has no
+  // vertical-scroll competition, so it locks to the horizontal axis immediately.
   function onCardPointerDown(e: React.PointerEvent) {
     if (e.pointerType === "touch") return;
     const target = e.target as Element;
     try {
       target.setPointerCapture?.(e.pointerId);
     } catch {}
-    beginCardDrag(e.clientX);
+    cardDragActive.current = true;
+    cardAxis.current = "x";
+    cardStartX.current = e.clientX;
+    cardMoved.current = false;
+    setCardDragging(true);
+    setCardDx(0);
   }
 
   function onCardPointerMove(e: React.PointerEvent) {
@@ -301,25 +306,50 @@ export default function DIYPage({
     endCardDrag();
   }
 
-  // Native, non-passive touch listeners for the swipe. These must be bound when
-  // the carousel element actually exists — it lives inside {workModeOpen && …},
-  // so it isn't in the DOM at the page's initial mount. Keying the effect on
-  // workModeOpen re-runs it when Work Mode opens (ref now populated) and cleans
-  // up when it closes. passive: false lets touchmove preventDefault() suppress
-  // the browser's competing horizontal scroll/back-swipe gesture. All drag
-  // state is read from refs, so the mount-time closure never goes stale.
+  // Native, non-passive touch listeners for the swipe. Bound when Work Mode
+  // opens (the carousel lives inside {workModeOpen && …}, so it isn't in the DOM
+  // at the page's initial mount). All drag state is read from refs, so the
+  // mount-time closure never goes stale.
+  //
+  // Directional lock: the first ~8px of movement decides the axis. A horizontal
+  // gesture becomes a step swipe (we preventDefault to own it). A vertical
+  // gesture is released — we abandon the drag and don't preventDefault, so the
+  // browser scrolls the step card behind the chat sheet natively. This is why
+  // the container uses touch-action: pan-y rather than none.
   useEffect(() => {
     if (!workModeOpen) return;
     const el = cardContainerRef.current;
     if (!el) return;
 
     function onTouchStart(e: TouchEvent) {
-      beginCardDrag(e.touches[0].clientX);
+      cardDragActive.current = true;
+      cardAxis.current = "none";
+      cardStartX.current = e.touches[0].clientX;
+      cardStartY.current = e.touches[0].clientY;
+      cardMoved.current = false;
     }
     function onTouchMove(e: TouchEvent) {
       if (!cardDragActive.current) return;
-      e.preventDefault();
-      updateCardDrag(e.touches[0].clientX);
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      if (cardAxis.current === "none") {
+        const dx = x - cardStartX.current;
+        const dy = y - cardStartY.current;
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          cardAxis.current = "x";
+          setCardDragging(true);
+        } else {
+          // Vertical: release so the card behind scrolls natively.
+          cardAxis.current = "y";
+          cardDragActive.current = false;
+          return;
+        }
+      }
+      if (cardAxis.current === "x") {
+        e.preventDefault();
+        updateCardDrag(x);
+      }
     }
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -634,7 +664,7 @@ export default function DIYPage({
             onPointerMove={onCardPointerMove}
             onPointerUp={onCardPointerEnd}
             onPointerCancel={onCardPointerEnd}
-            style={{ touchAction: "none" }}
+            style={{ touchAction: "pan-y" }}
             className="relative flex-1 overflow-hidden"
           >
             <div
@@ -709,7 +739,8 @@ export default function DIYPage({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center justify-center gap-4.5 px-5 py-1">
+          {/* mb-[34px] keeps this row above the collapsed chat pill (also 34px) */}
+          <div className="mb-[34px] flex shrink-0 items-center justify-center gap-4.5 px-5 py-1">
             <button onClick={() => goToStep(stepIndex - 1)} style={{ opacity: stepIndex === 0 ? 0.35 : 1 }} className="border-none bg-transparent p-2 text-[13px] font-medium text-porch-text-tertiary">
               ← Previous
             </button>
@@ -721,8 +752,8 @@ export default function DIYPage({
           <BottomSheet
             position="absolute"
             zIndex={55}
-            collapsedHeight={152}
-            persistentContent={
+            collapsedHeight={34}
+            handleLabel={
               <div className="flex w-full items-center gap-2.5 px-4 pb-2 pt-0.5">
                 <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-porch-accent">
                   <AssistantAvatar size={22} variant="bust" />
