@@ -265,17 +265,24 @@ export default function DIYPage({
     if (!cardDragActive.current) return;
     cardDragActive.current = false;
     const dx = cardDragDxRef.current;
-    const threshold = 60;
+    // Navigate once the drag passes ~30% of the visible card width. Read the
+    // width live from the DOM so it stays correct after an orientation change.
+    const cardWidth = cardContainerRef.current?.offsetWidth || viewportWidth;
+    const threshold = cardWidth * 0.3;
     const total = stepsLengthRef.current + 1;
     let next = stepIndexRef.current;
-    if (dx < -threshold && next < total - 1) next += 1;
-    else if (dx > threshold && next > 0) next -= 1;
+    if (dx <= -threshold && next < total - 1) next += 1;
+    else if (dx >= threshold && next > 0) next -= 1;
     setCardDragging(false);
     setCardDx(0);
     setStepIndex(next);
   }
 
+  // Pointer events handle mouse/pen only. Touch is handled exclusively by the
+  // native (non-passive) touch listeners in the effect below — running both for
+  // a single finger gesture would double-process it on browsers that fire both.
   function onCardPointerDown(e: React.PointerEvent) {
+    if (e.pointerType === "touch") return;
     const target = e.target as Element;
     try {
       target.setPointerCapture?.(e.pointerId);
@@ -284,14 +291,25 @@ export default function DIYPage({
   }
 
   function onCardPointerMove(e: React.PointerEvent) {
-    if (!cardDragActive.current) return;
+    if (e.pointerType === "touch" || !cardDragActive.current) return;
     e.preventDefault();
     updateCardDrag(e.clientX);
   }
 
-  // Native (non-passive) touch fallback — see BottomSheet.tsx for why this
-  // is needed alongside Pointer Events for reliable mobile drag handling.
+  function onCardPointerEnd(e: React.PointerEvent) {
+    if (e.pointerType === "touch") return;
+    endCardDrag();
+  }
+
+  // Native, non-passive touch listeners for the swipe. These must be bound when
+  // the carousel element actually exists — it lives inside {workModeOpen && …},
+  // so it isn't in the DOM at the page's initial mount. Keying the effect on
+  // workModeOpen re-runs it when Work Mode opens (ref now populated) and cleans
+  // up when it closes. passive: false lets touchmove preventDefault() suppress
+  // the browser's competing horizontal scroll/back-swipe gesture. All drag
+  // state is read from refs, so the mount-time closure never goes stale.
   useEffect(() => {
+    if (!workModeOpen) return;
     const el = cardContainerRef.current;
     if (!el) return;
 
@@ -315,7 +333,7 @@ export default function DIYPage({
       el.removeEventListener("touchcancel", endCardDrag);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [workModeOpen]);
 
   const materials = issueDetails?.materialsList ?? [];
   const steps = issueDetails?.stepByStepPlan ?? [];
@@ -614,8 +632,8 @@ export default function DIYPage({
             ref={cardContainerRef}
             onPointerDown={onCardPointerDown}
             onPointerMove={onCardPointerMove}
-            onPointerUp={endCardDrag}
-            onPointerCancel={endCardDrag}
+            onPointerUp={onCardPointerEnd}
+            onPointerCancel={onCardPointerEnd}
             style={{ touchAction: "none" }}
             className="relative flex-1 overflow-hidden"
           >
