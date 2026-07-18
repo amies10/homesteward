@@ -36,21 +36,23 @@
   --font-display: Georgia, 'Times New Roman', serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-}
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+  }
 
-::selection {
-  background: #7d234a33;
-}
+  ::selection {
+    background: #7d234a33;
+  }
 
-a {
-  color: #7D234A;
-}
-a:hover {
-  color: #5A1836;
+  a {
+    color: #7D234A;
+  }
+  a:hover {
+    color: #5A1836;
+  }
 }
 
 @property --angle {
