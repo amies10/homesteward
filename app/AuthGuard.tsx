@@ -6,6 +6,10 @@ import { supabase } from "@/lib/supabase-client";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
+function boot(msg: string) {
+  (window as unknown as { __boot?: { push: (m: string) => void } }).__boot?.push(msg);
+}
+
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -15,6 +19,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+    boot("authguard: checking session");
 
     // getSession() reads/refreshes the session from storage and can reject
     // (or, on some mobile browsers with restricted storage access, hang) —
@@ -32,6 +37,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       .then(({ data: { session } }) => {
         if (cancelled) return;
         clearTimeout(timeout);
+        boot("authguard: session " + (session ? "found" : "none"));
         if (!session && !isPublic) {
           router.replace("/login");
         } else if (session && isPublic) {
@@ -43,6 +49,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       .catch((err) => {
         if (cancelled) return;
         clearTimeout(timeout);
+        boot("authguard: session ERROR " + (err instanceof Error ? err.message : String(err)));
         console.error("[AuthGuard] supabase.auth.getSession() rejected:", err);
         setAuthError(err instanceof Error ? err.message : "Couldn't verify your session.");
       });
@@ -79,6 +86,15 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!ready) return null;
+  // Visible loading state rather than `null`, so a stalled boot is always
+  // distinguishable from a genuinely blank page (the failure mode that made
+  // the earlier mobile issue so hard to diagnose).
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-porch-bg">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-porch-accent border-t-transparent" />
+      </div>
+    );
+  }
   return <>{children}</>;
 }
