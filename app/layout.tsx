@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AuthGuard from "./AuthGuard";
+import ErrorBoundary from "./components/ErrorBoundary";
+import GlobalErrorOverlay from "./components/GlobalErrorOverlay";
 
 export const metadata: Metadata = {
   title: "Porchlight",
@@ -15,7 +17,10 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col font-sans">
-        <AuthGuard>{children}</AuthGuard>
+        <GlobalErrorOverlay />
+        <ErrorBoundary>
+          <AuthGuard>{children}</AuthGuard>
+        </ErrorBoundary>
       </body>
     </html>
   );
