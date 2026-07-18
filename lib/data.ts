@@ -152,26 +152,55 @@ export async function saveIssueDetails(
 
 // ── User profile ───────────────────────────────────────────────────────────
 
+// Address is populated separately from inspection-report parsing (see
+// updateProfileAddress), never from this call — preserve whatever's already
+// cached/stored rather than letting an address-less save wipe it out.
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
-  localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+  let address = profile.address;
+  if (address === undefined) {
+    try {
+      const stored = localStorage.getItem(USER_PROFILE_KEY);
+      if (stored) address = (JSON.parse(stored) as UserProfile).address;
+    } catch {}
+  }
+  localStorage.setItem(USER_PROFILE_KEY, JSON.stringify({ ...profile, address }));
 
   const userId = await getCurrentUserId();
   if (!userId) return;
 
   try {
-    const { error } = await supabase.from("user_profile").upsert(
-      {
-        user_id: userId,
-        skill_level: profile.skillLevel,
-        location: profile.location,
-        address: profile.address ?? null,
-        onboarding_completed: profile.onboardingCompleted,
-      },
-      { onConflict: "user_id" }
-    );
+    const payload: Record<string, unknown> = {
+      user_id: userId,
+      skill_level: profile.skillLevel,
+      location: profile.location,
+      onboarding_completed: profile.onboardingCompleted,
+    };
+    if (address !== undefined) payload.address = address;
+    const { error } = await supabase.from("user_profile").upsert(payload, { onConflict: "user_id" });
     if (error) throw error;
   } catch (err) {
     console.warn("[data] saveUserProfile: Supabase unavailable, localStorage only.", err);
+  }
+}
+
+export async function updateProfileAddress(address: string): Promise<void> {
+  try {
+    const stored = localStorage.getItem(USER_PROFILE_KEY);
+    if (stored) {
+      const profile = JSON.parse(stored) as UserProfile;
+      profile.address = address;
+      localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+    }
+  } catch {}
+
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  try {
+    const { error } = await supabase.from("user_profile").update({ address }).eq("user_id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("[data] updateProfileAddress: Supabase unavailable, localStorage only.", err);
   }
 }
 

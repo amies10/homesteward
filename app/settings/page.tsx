@@ -37,7 +37,6 @@ const SKILL_OPTIONS: Array<{
 export default function SettingsPage() {
   const [skillLevel, setSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [location, setLocation] = useState("");
-  const [address, setAddress] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -47,7 +46,6 @@ export default function SettingsPage() {
       if (profile) {
         setSkillLevel(profile.skillLevel);
         setLocation(profile.location);
-        setAddress(profile.address ?? "");
       }
       setLoaded(true);
     });
@@ -59,7 +57,6 @@ export default function SettingsPage() {
     await saveUserProfile({
       skillLevel,
       location: location.trim(),
-      address: address.trim() || undefined,
       onboardingCompleted: true,
     });
     setSaving(false);
@@ -112,20 +109,6 @@ export default function SettingsPage() {
                 );
               })}
             </div>
-          </div>
-
-          <div className="px-5 pb-1 pt-[26px]">
-            <div className="text-[15.5px] font-semibold text-porch-text">Property Address</div>
-            <div className="mb-2.5 mt-0.5 text-[13.5px] text-porch-text-secondary">
-              Shown on your dashboard. Optional.
-            </div>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="14 Maple Ridge Rd"
-              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
-            />
           </div>
 
           <div className="px-5 pb-1 pt-[26px]">

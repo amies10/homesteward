@@ -12,6 +12,7 @@ import {
   loadUserProfile,
   clearLocalReport,
   updateReport,
+  updateProfileAddress,
 } from "@/lib/data";
 import Logo from "@/app/components/Logo";
 import Modal from "@/app/components/Modal";
@@ -143,6 +144,10 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(data.error || "Upload failed");
       setReport(data);
       await saveReport(data, file.name);
+      if (data.propertyAddress) {
+        setAddress(data.propertyAddress);
+        await updateProfileAddress(data.propertyAddress);
+      }
       setJustUploaded(true);
       setTimeout(() => setJustUploaded(false), 1800);
       setShowSummaryModal(true);
