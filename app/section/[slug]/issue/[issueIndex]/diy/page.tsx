@@ -2,6 +2,7 @@
 
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   sections,
   normalize,
@@ -24,6 +25,7 @@ export default function DIYPage({
 }: {
   params: Promise<{ slug: string; issueIndex: string }>;
 }) {
+  const router = useRouter();
   const { slug, issueIndex } = use(params);
   const index = parseInt(issueIndex, 10);
   const sectionConfig = sections.find((s) => s.slug === slug);
@@ -816,12 +818,20 @@ export default function DIYPage({
               <div className="max-w-[300px] text-[15px] leading-relaxed text-porch-text-secondary">
                 That&apos;s one more thing taken care of. Your home&apos;s a little better off because of it.
               </div>
-              <button
-                onClick={() => { setShowCongrats(false); setWorkModeOpen(false); }}
-                className="btn-press mt-2 rounded-full border-none bg-porch-accent px-7 py-3 text-[14.5px] font-semibold text-white"
-              >
-                Back to Repair
-              </button>
+              <div className="mt-2 flex w-full max-w-[300px] flex-col gap-2.5">
+                <button
+                  onClick={() => router.push("/")}
+                  className="btn-press w-full rounded-full border-none bg-porch-accent px-7 py-3 text-[14.5px] font-semibold text-white"
+                >
+                  Back to Home
+                </button>
+                <button
+                  onClick={() => router.push(`/section/${slug}/issue/${index}`)}
+                  className="btn-press w-full rounded-full border-[1.5px] border-porch-accent bg-transparent px-7 py-3 text-[14.5px] font-semibold text-porch-accent"
+                >
+                  Back to Repair
+                </button>
+              </div>
             </div>
           )}
         </div>

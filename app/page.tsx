@@ -18,7 +18,7 @@ import Logo from "@/app/components/Logo";
 import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import SectionIcon from "@/app/components/SectionIcon";
-import { CheckIcon, ChevronRightIcon, PlusIcon, SettingsIcon, UploadIcon } from "@/app/components/icons";
+import { CheckIcon, ChevronRightIcon, PlusIcon, SearchIcon, SettingsIcon, UploadIcon, XIcon } from "@/app/components/icons";
 
 const SEVERITY_ORDER: Record<Issue["severity"], number> = {
   safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
@@ -63,6 +63,7 @@ export default function Dashboard() {
   const [newSectionDesc, setNewSectionDesc] = useState("");
   const [addingSectionLoading, setAddingSectionLoading] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -94,6 +95,20 @@ export default function Dashboard() {
     return section.issues.filter(
       (issue, i) => !issue.deleted && !completions[`${slug}-${i}`] && !ignored[`${slug}-${i}`]
     );
+  }
+
+  function matchingIssueCount(label: string, slug: string, query: string): number {
+    if (!report) return 0;
+    const section = report.sections.find(
+      (s) => s.slug === slug || normalize(s.name) === normalize(label)
+    );
+    if (!section) return 0;
+    const q = query.toLowerCase();
+    return section.issues.filter(
+      (issue) =>
+        !issue.deleted &&
+        (issue.title.toLowerCase().includes(q) || issue.description.toLowerCase().includes(q))
+    ).length;
   }
 
   function navigateToSection(slug: string) {
@@ -177,6 +192,13 @@ export default function Dashboard() {
       custom: true,
     })) ?? []),
   ];
+
+  const searchQuery = search.trim();
+  const visibleSectionRows = searchQuery
+    ? allSectionRows
+        .map((row) => ({ ...row, matchCount: matchingIssueCount(row.name, row.slug, searchQuery) }))
+        .filter((row) => row.matchCount > 0)
+    : allSectionRows.map((row) => ({ ...row, matchCount: 0 }));
 
   if (!profileChecked) return null;
 
@@ -262,14 +284,42 @@ export default function Dashboard() {
         </button>
       </div>
 
+      {report && (
+        <div className="px-5 pb-1">
+          <div className="flex items-center gap-2 rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5">
+            <SearchIcon size={15} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search issues..."
+              className="flex-1 border-none bg-transparent text-sm text-porch-text outline-none placeholder:text-porch-text-tertiary"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="flex items-center p-0.5 text-porch-text-tertiary"
+              >
+                <XIcon size={14} color="#A99C8B" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {!report ? (
         <div className="mx-5 mt-2 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
           <p className="text-sm text-porch-text-secondary">
             Upload an inspection report using the icon above to get started.
           </p>
         </div>
+      ) : searchQuery && visibleSectionRows.length === 0 ? (
+        <div className="mx-5 mt-2 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+          <p className="text-sm text-porch-text-secondary">No issues match &quot;{searchQuery}&quot;.</p>
+        </div>
       ) : (
-        allSectionRows.map((row) => {
+        visibleSectionRows.map((row) => {
           const activeIssues = activeIssuesFor(row.name, row.slug);
           const urgent = activeIssues.some((i) => i.severity === "safety");
           const selected = selectedSlug === row.slug;
@@ -296,7 +346,14 @@ export default function Dashboard() {
                     {row.desc}
                   </div>
                 </div>
-                <ChevronRightIcon size={16} />
+                <div className="flex shrink-0 items-center gap-2">
+                  {searchQuery && (
+                    <span className="whitespace-nowrap rounded-full bg-porch-accent-tint px-2.5 py-1 text-xs font-semibold text-porch-accent">
+                      {row.matchCount} match{row.matchCount !== 1 ? "es" : ""}
+                    </span>
+                  )}
+                  <ChevronRightIcon size={16} />
+                </div>
               </a>
             </div>
           );

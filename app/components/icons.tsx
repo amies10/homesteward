@@ -5,6 +5,15 @@ interface IconProps {
   className?: string;
 }
 
+export function SearchIcon({ size = 16, color = "#A99C8B", strokeWidth = 2, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  );
+}
+
 export function ChevronLeftIcon({ size = 16, color = "#857A6D", strokeWidth = 2, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
