@@ -39,6 +39,11 @@ function greeting(): string {
   return "Good evening";
 }
 
+// "104 Evergreen Ct, Frederick, MD 21701" -> "104 Evergreen Ct"
+function streetAddress(fullAddress: string): string {
+  return fullAddress.split(",")[0].trim();
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [profileChecked, setProfileChecked] = useState(false);
@@ -224,7 +229,7 @@ export default function Dashboard() {
         <div className="rounded-2xl border border-porch-border bg-porch-surface p-5 shadow-[0_1px_2px_rgba(38,34,32,0.03)]">
           <div className="mb-0.5 text-[15px] text-[#6B5F55]">{greeting()}</div>
           <div className="font-display text-[22px] font-semibold text-porch-text">
-            {address || "Your Home"}
+            {address ? streetAddress(address) : "Your Home"}
           </div>
           <div className="mt-4 flex gap-2.5">
             <button
