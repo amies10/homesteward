@@ -79,6 +79,7 @@ export const USER_PROFILE_KEY = "homesteward_user_profile";
 export interface UserProfile {
   skillLevel: "beginner" | "some_experience" | "experienced" | "expert";
   location: string;
+  address?: string;
   onboardingCompleted: boolean;
 }
 

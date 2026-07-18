@@ -42,6 +42,7 @@ export default function Dashboard() {
   const router = useRouter();
   const [profileChecked, setProfileChecked] = useState(false);
   const [location, setLocation] = useState<string | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
   const [skillLevel, setSkillLevel] = useState<string | null>(null);
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [completions, setCompletions] = useState<Record<string, unknown>>({});
@@ -66,6 +67,7 @@ export default function Dashboard() {
       }
       setProfileChecked(true);
       setLocation(profile.location ?? null);
+      setAddress(profile.address ?? null);
       setSkillLevel(profile.skillLevel ?? null);
       Promise.all([loadLatestReport(), loadCompletions(), loadIgnored()]).then(
         ([report, completions, ignored]) => {
@@ -217,7 +219,7 @@ export default function Dashboard() {
         <div className="rounded-2xl border border-porch-border bg-porch-surface p-5 shadow-[0_1px_2px_rgba(38,34,32,0.03)]">
           <div className="mb-0.5 text-[15px] text-[#6B5F55]">{greeting()}</div>
           <div className="font-display text-[22px] font-semibold text-porch-text">
-            {location || "Your home"}
+            {address || "Your Home"}
           </div>
           <div className="mt-4 flex gap-2.5">
             <button

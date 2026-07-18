@@ -164,6 +164,7 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
         user_id: userId,
         skill_level: profile.skillLevel,
         location: profile.location,
+        address: profile.address ?? null,
         onboarding_completed: profile.onboardingCompleted,
       },
       { onConflict: "user_id" }
@@ -178,7 +179,7 @@ export async function loadUserProfile(): Promise<UserProfile | null> {
   try {
     const { data, error } = await supabase
       .from("user_profile")
-      .select("skill_level, location, onboarding_completed")
+      .select("skill_level, location, address, onboarding_completed")
       .maybeSingle();
 
     if (error) throw error;
@@ -187,6 +188,7 @@ export async function loadUserProfile(): Promise<UserProfile | null> {
     const profile: UserProfile = {
       skillLevel: data.skill_level,
       location: data.location,
+      address: data.address ?? undefined,
       onboardingCompleted: data.onboarding_completed,
     };
     localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
