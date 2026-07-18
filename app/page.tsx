@@ -13,7 +13,11 @@ import {
   clearLocalReport,
   updateReport,
 } from "@/lib/data";
-import { supabase } from "@/lib/supabase-client";
+import Logo from "@/app/components/Logo";
+import Modal from "@/app/components/Modal";
+import ChatFAB from "@/app/components/ChatFAB";
+import SectionIcon from "@/app/components/SectionIcon";
+import { CheckIcon, ChevronRightIcon, PlusIcon, SettingsIcon, UploadIcon } from "@/app/components/icons";
 
 const SEVERITY_ORDER: Record<Issue["severity"], number> = {
   safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
@@ -27,13 +31,23 @@ const SEVERITY_STYLE: Record<Issue["severity"], { badge: string; label: string }
   fyi: { badge: "bg-stone-100 text-stone-500", label: "FYI" },
 };
 
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [profileChecked, setProfileChecked] = useState(false);
+  const [location, setLocation] = useState<string | null>(null);
+  const [skillLevel, setSkillLevel] = useState<string | null>(null);
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [completions, setCompletions] = useState<Record<string, unknown>>({});
   const [ignored, setIgnored] = useState<Record<string, true>>({});
   const [loading, setLoading] = useState(false);
+  const [justUploaded, setJustUploaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -41,6 +55,7 @@ export default function Dashboard() {
   const [newSectionName, setNewSectionName] = useState("");
   const [newSectionDesc, setNewSectionDesc] = useState("");
   const [addingSectionLoading, setAddingSectionLoading] = useState(false);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -50,6 +65,8 @@ export default function Dashboard() {
         return;
       }
       setProfileChecked(true);
+      setLocation(profile.location ?? null);
+      setSkillLevel(profile.skillLevel ?? null);
       Promise.all([loadLatestReport(), loadCompletions(), loadIgnored()]).then(
         ([report, completions, ignored]) => {
           if (report) setReport(report);
@@ -60,15 +77,21 @@ export default function Dashboard() {
     });
   }, [router]);
 
-  function issueCountFor(label: string, slug: string): number {
-    if (!report) return 0;
+  function activeIssuesFor(label: string, slug: string): Issue[] {
+    if (!report) return [];
     const section = report.sections.find(
       (s) => s.slug === slug || normalize(s.name) === normalize(label)
     );
-    if (!section) return 0;
+    if (!section) return [];
     return section.issues.filter(
       (issue, i) => !issue.deleted && !completions[`${slug}-${i}`] && !ignored[`${slug}-${i}`]
-    ).length;
+    );
+  }
+
+  function navigateToSection(slug: string) {
+    if (selectedSlug) return;
+    setSelectedSlug(slug);
+    setTimeout(() => router.push(`/section/${slug}`), 600);
   }
 
   async function handleAddSection() {
@@ -118,6 +141,8 @@ export default function Dashboard() {
       if (!res.ok) throw new Error(data.error || "Upload failed");
       setReport(data);
       await saveReport(data, file.name);
+      setJustUploaded(true);
+      setTimeout(() => setJustUploaded(false), 1800);
       setShowSummaryModal(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -126,265 +151,183 @@ export default function Dashboard() {
     }
   }
 
-  const totalIssues = report?.sections.reduce(
-    (sum, s) => sum + s.issues.length,
-    0
-  );
+  const allSectionRows = [
+    ...sections.map((section) => ({
+      slug: section.slug,
+      name: report?.sections.find((s) => s.slug === section.slug || normalize(s.name) === normalize(section.label))?.name ?? section.label,
+      desc: section.description,
+      custom: false,
+    })),
+    ...(report?.sections.filter((s) => s.userAdded && s.slug).map((s) => ({
+      slug: s.slug!,
+      name: s.name,
+      desc: s.description ?? "Custom section",
+      custom: true,
+    })) ?? []),
+  ];
 
   if (!profileChecked) return null;
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <header className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-baseline gap-3">
-              <h1 className="text-xl font-semibold tracking-tight text-stone-900">
-                HomeSteward
-              </h1>
-              <span className="text-sm text-stone-400">property overview</span>
-            </div>
-            <div className="flex items-center gap-5">
-              <Link
-                href="/completed"
-                className="text-sm text-stone-500 transition-colors hover:text-stone-800"
-              >
-                Completed Fixes
-              </Link>
-              <Link
-                href="/settings"
-                className="text-sm text-stone-500 transition-colors hover:text-stone-800"
-              >
-                Settings
-              </Link>
-              <button
-                onClick={() => supabase.auth.signOut()}
-                className="text-sm text-stone-400 transition-colors hover:text-stone-700"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
+    <div className="min-h-screen bg-porch-bg pb-12 text-porch-text">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-porch-border bg-porch-surface px-5 py-4">
+        <Logo size={34} wordmarkSize={20} />
+        <div className="flex items-center gap-2.5">
+          <Link href="/completed" className="text-[13px] font-semibold text-porch-text-secondary no-underline">
+            Completed Fixes
+          </Link>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFile(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => inputRef.current?.click()}
+            disabled={loading}
+            aria-label="Upload new report"
+            className="btn-press relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] border-none bg-porch-accent-tint disabled:opacity-60"
+          >
+            {justUploaded ? (
+              <CheckIcon size={16} color="#3E7A4F" strokeWidth={2.4} />
+            ) : loading ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-porch-accent border-t-transparent" />
+            ) : (
+              <UploadIcon size={16} />
+            )}
+          </button>
+          <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1.5">
+            <SettingsIcon size={22} />
+          </Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-10 space-y-10">
-        {/* Upload area */}
-        <div className="rounded-lg border border-stone-200 bg-white px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-stone-900">
-                Inspection Report
-              </p>
-              <p className="mt-0.5 text-xs text-stone-400">
-                Upload a PDF inspection report to extract and categorize issues
-                by section.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              {loading && (
-                <span className="text-xs text-stone-500">Parsing report…</span>
-              )}
-              {error && (
-                <span className="max-w-xs text-xs text-red-600">{error}</span>
-              )}
-              <input
-                ref={inputRef}
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFile(file);
-                  e.target.value = "";
+      {error && (
+        <div className="px-5 pt-3">
+          <p className="text-xs text-red-600">{error}</p>
+        </div>
+      )}
+
+      <div className="px-5 pb-1 pt-6">
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-5 shadow-[0_1px_2px_rgba(38,34,32,0.03)]">
+          <div className="mb-0.5 text-[15px] text-[#6B5F55]">{greeting()}</div>
+          <div className="font-display text-[22px] font-semibold text-porch-text">
+            {location || "Your home"}
+          </div>
+          <div className="mt-4 flex gap-2.5">
+            <button
+              onClick={() => setShowSummaryModal(true)}
+              disabled={!report}
+              className="btn-press flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface py-[11px] text-sm font-medium text-porch-text disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              View summary
+            </button>
+            <Link
+              href="/add-issue"
+              className="btn-press flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border-none bg-porch-accent py-[11px] text-sm font-medium text-white no-underline"
+            >
+              <PlusIcon size={15} color="#FFFFFF" strokeWidth={2} />
+              Log a fix or upgrade
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2.5 px-5 pb-2.5 pt-7">
+        <div className="font-display text-xl font-semibold text-porch-text">What are we working on?</div>
+        <button
+          onClick={() => setShowAddSection(true)}
+          disabled={!report}
+          className="btn-press flex shrink-0 items-center gap-1.5 border-none bg-transparent p-0 text-[13.5px] font-semibold text-porch-accent disabled:opacity-40"
+        >
+          <PlusIcon />
+          Add Section
+        </button>
+      </div>
+
+      {!report ? (
+        <div className="mx-5 mt-2 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+          <p className="text-sm text-porch-text-secondary">
+            Upload an inspection report using the icon above to get started.
+          </p>
+        </div>
+      ) : (
+        allSectionRows.map((row) => {
+          const activeIssues = activeIssuesFor(row.name, row.slug);
+          const urgent = activeIssues.some((i) => i.severity === "safety");
+          const selected = selectedSlug === row.slug;
+          return (
+            <div key={row.slug} className="px-5 py-1.5">
+              <a
+                href={`/section/${row.slug}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigateToSection(row.slug);
                 }}
-              />
-              {report && !loading && (
-                <>
-                  <button
-                    onClick={() => setShowSummaryModal(true)}
-                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50"
-                  >
-                    View Summary
-                  </button>
-                  <button
-                    onClick={() => setShowClearConfirm(true)}
-                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-400 transition-colors hover:bg-stone-50 hover:text-stone-600"
-                  >
-                    Clear
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => inputRef.current?.click()}
-                disabled={loading}
-                className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="relative flex w-full items-center gap-3.5 rounded-2xl border border-porch-border bg-porch-surface px-4 py-4 text-inherit no-underline shadow-[0_1px_2px_rgba(38,34,32,0.03)]"
               >
-                {loading ? "Parsing…" : "Upload PDF"}
-              </button>
-            </div>
-          </div>
-
-          {report && (
-            <div className="mt-4 border-t border-stone-100 pt-3">
-              <p className="text-xs text-stone-500">
-                Found{" "}
-                <span className="font-medium text-stone-700">
-                  {totalIssues} issue{totalIssues !== 1 ? "s" : ""}
-                </span>{" "}
-                across{" "}
-                <span className="font-medium text-stone-700">
-                  {report.sections.length} section
-                  {report.sections.length !== 1 ? "s" : ""}
-                </span>
-                .
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Section cards */}
-        <div>
-          <div className="mb-6">
-            <h2 className="text-2xl font-semibold tracking-tight text-stone-900">
-              Home Sections
-            </h2>
-            <p className="mt-1 text-sm text-stone-500">
-              Select a section to view maintenance history, upcoming tasks, and
-              notes.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {sections.map((section) => {
-              const reportSection = report?.sections.find(
-                (s) => s.slug === section.slug || normalize(s.name) === normalize(section.label)
-              );
-              const displayName = reportSection?.name ?? section.label;
-              const count = issueCountFor(section.label, section.slug);
-              return (
-                <Link
-                  key={section.slug}
-                  href={`/section/${section.slug}`}
-                  className="group flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-5 py-4 transition-colors hover:border-stone-300 hover:bg-stone-50"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-stone-900 group-hover:text-stone-700">
-                      {displayName}
-                    </span>
-                    {count > 0 && (
-                      <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
-                        {count} issue{count !== 1 ? "s" : ""}
-                      </span>
-                    )}
+                {selected && <div className="comet-ring" />}
+                <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[11px] bg-porch-accent-tint">
+                  <SectionIcon slug={row.slug} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[15.5px] font-semibold text-porch-text">{row.name}</span>
+                    {urgent && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-porch-urgent" />}
                   </div>
-                  <span className="text-xs leading-relaxed text-stone-400">
-                    {section.description}
-                  </span>
-                </Link>
-              );
-            })}
-
-            {/* Custom sections */}
-            {report?.sections
-              .filter((s) => s.userAdded && s.slug)
-              .map((s) => {
-                const count = issueCountFor(s.name, s.slug!);
-                return (
-                  <Link
-                    key={s.slug}
-                    href={`/section/${s.slug}`}
-                    className="group flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-5 py-4 transition-colors hover:border-stone-300 hover:bg-stone-50"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-stone-900 group-hover:text-stone-700">
-                        {s.name}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {count > 0 && (
-                          <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
-                            {count} issue{count !== 1 ? "s" : ""}
-                          </span>
-                        )}
-                        <span className="rounded-full border border-stone-200 px-2 py-0.5 text-xs text-stone-400">
-                          Custom
-                        </span>
-                      </div>
-                    </div>
-                    <span className="text-xs leading-relaxed text-stone-400">
-                      {s.description ?? "Custom section"}
-                    </span>
-                  </Link>
-                );
-              })}
-          </div>
-
-          {/* Add Section */}
-          {report && (
-            <div className="mt-4">
-              <button
-                onClick={() => setShowAddSection(true)}
-                className="rounded-md border border-dashed border-stone-300 px-4 py-2 text-sm text-stone-500 transition-colors hover:border-stone-400 hover:text-stone-700"
-              >
-                + Add Section
-              </button>
+                  <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-porch-text-secondary">
+                    {row.desc}
+                  </div>
+                </div>
+                <ChevronRightIcon size={16} />
+              </a>
             </div>
-          )}
-        </div>
-      </main>
+          );
+        })
+      )}
 
       {showAddSection && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-stone-200 bg-white shadow-lg">
-            <div className="border-b border-stone-100 px-6 py-4">
-              <p className="text-sm font-semibold text-stone-900">Add Section</p>
-            </div>
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">
-                  Section name
-                </label>
-                <input
-                  type="text"
-                  value={newSectionName}
-                  onChange={(e) => setNewSectionName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleAddSection(); }}
-                  placeholder="e.g. Pool, Garage, Deck"
-                  autoFocus
-                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-stone-700">
-                  Description{" "}
-                  <span className="font-normal text-stone-400">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={newSectionDesc}
-                  onChange={(e) => setNewSectionDesc(e.target.value)}
-                  placeholder="Brief description"
-                  className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 border-t border-stone-100 px-6 py-4">
-              <button
-                onClick={() => { setShowAddSection(false); setNewSectionName(""); setNewSectionDesc(""); }}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddSection}
-                disabled={!newSectionName.trim() || addingSectionLoading}
-                className="rounded-md border border-stone-800 bg-stone-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {addingSectionLoading ? "Adding…" : "Add Section"}
-              </button>
-            </div>
+        <Modal onClose={() => setShowAddSection(false)}>
+          <div className="mb-4 font-display text-lg font-semibold text-porch-text">New Section of the House</div>
+          <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Section of House</label>
+          <input
+            type="text"
+            value={newSectionName}
+            onChange={(e) => setNewSectionName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleAddSection(); }}
+            placeholder="e.g. Detached Garage"
+            autoFocus
+            className="mb-3.5 w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          />
+          <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Description</label>
+          <input
+            type="text"
+            value={newSectionDesc}
+            onChange={(e) => setNewSectionDesc(e.target.value)}
+            placeholder="What's covered here?"
+            className="mb-[18px] w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setShowAddSection(false); setNewSectionName(""); setNewSectionDesc(""); }}
+              className="btn-press flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface py-2.5 text-sm font-semibold text-porch-text-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddSection}
+              disabled={!newSectionName.trim() || addingSectionLoading}
+              className="btn-press flex-1 rounded-[10px] border-none bg-porch-accent py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {addingSectionLoading ? "Adding…" : "Add Section"}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showSummaryModal && report && (() => {
@@ -395,102 +338,114 @@ export default function Dashboard() {
           .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity])
           .slice(0, 3);
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-md rounded-lg border border-stone-200 bg-white shadow-lg">
-              <div className="border-b border-stone-100 px-6 py-5">
-                <p className="text-base font-semibold text-stone-900">Report Parsed Successfully</p>
-                {report.propertyAddress && (
-                  <p className="mt-1 text-sm text-stone-500">{report.propertyAddress}</p>
-                )}
+          <Modal onClose={() => setShowSummaryModal(false)} maxWidth={400} maxHeight="75vh">
+            <div className="mb-3.5 flex items-center justify-between">
+              <span className="font-display text-lg font-semibold text-porch-text">Inspection Summary</span>
+            </div>
+            {report.propertyAddress && (
+              <p className="mb-3 text-sm text-porch-text-secondary">{report.propertyAddress}</p>
+            )}
+            <div className="mb-4 grid grid-cols-2 gap-2.5">
+              <div className="rounded-[10px] bg-porch-bg px-4 py-3">
+                <p className="font-display text-2xl font-semibold text-porch-text">{allIssues.length}</p>
+                <p className="mt-0.5 text-xs text-porch-text-secondary">Total issues</p>
               </div>
-
-              <div className="border-b border-stone-100 px-6 py-5">
-                <p className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-400">Summary</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md bg-stone-50 px-4 py-3">
-                    <p className="text-2xl font-semibold tracking-tight text-stone-900">{allIssues.length}</p>
-                    <p className="mt-0.5 text-xs text-stone-500">Total issues</p>
-                  </div>
-                  <div className="rounded-md bg-stone-50 px-4 py-3">
-                    <p className="text-2xl font-semibold tracking-tight text-stone-900">{report.sections.length}</p>
-                    <p className="mt-0.5 text-xs text-stone-500">Sections affected</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(["safety", "repair", "maintenance", "improvement", "fyi"] as const).map((sev) => {
-                    const count = severityCounts[sev];
-                    if (!count) return null;
-                    const style = SEVERITY_STYLE[sev];
-                    return (
-                      <span key={sev} className={`rounded-full px-2.5 py-1 text-xs font-medium ${style.badge}`}>
-                        {count} {style.label}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {top3.length > 0 && (
-                <div className="border-b border-stone-100 px-6 py-5">
-                  <p className="mb-3 text-xs font-medium uppercase tracking-wide text-stone-400">Top Priority Issues</p>
-                  <ul className="space-y-2.5">
-                    {top3.map((issue, i) => {
-                      const style = SEVERITY_STYLE[issue.severity];
-                      return (
-                        <li key={i} className="flex items-start justify-between gap-3">
-                          <span className="text-sm leading-snug text-stone-700">{issue.title}</span>
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}>
-                            {style.label}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              <div className="px-6 py-5">
-                <button
-                  onClick={() => setShowSummaryModal(false)}
-                  className="w-full rounded-md border border-stone-800 bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800"
-                >
-                  View My Home
-                </button>
+              <div className="rounded-[10px] bg-porch-bg px-4 py-3">
+                <p className="font-display text-2xl font-semibold text-porch-text">{report.sections.length}</p>
+                <p className="mt-0.5 text-xs text-porch-text-secondary">Sections affected</p>
               </div>
             </div>
-          </div>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {(["safety", "repair", "maintenance", "improvement", "fyi"] as const).map((sev) => {
+                const count = severityCounts[sev];
+                if (!count) return null;
+                const style = SEVERITY_STYLE[sev];
+                return (
+                  <span key={sev} className={`rounded-full px-2.5 py-1 text-xs font-medium ${style.badge}`}>
+                    {count} {style.label}
+                  </span>
+                );
+              })}
+            </div>
+            {top3.length > 0 && (
+              <div className="mb-5 border-t border-[#ECE0D8] pt-4">
+                <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-porch-text-tertiary">
+                  Top Priority Issues
+                </p>
+                <ul className="space-y-2.5">
+                  {top3.map((issue, i) => {
+                    const style = SEVERITY_STYLE[issue.severity];
+                    return (
+                      <li key={i} className="flex items-start justify-between gap-3">
+                        <span className="text-sm leading-snug text-porch-text">{issue.title}</span>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${style.badge}`}>
+                          {style.label}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            <button
+              onClick={() => setShowSummaryModal(false)}
+              className="btn-press w-full rounded-[10px] border-none bg-porch-accent py-3 text-sm font-semibold text-white"
+            >
+              View My Home
+            </button>
+            <button
+              onClick={() => { setShowSummaryModal(false); setShowClearConfirm(true); }}
+              className="mt-3 w-full text-center text-xs text-porch-text-tertiary underline underline-offset-2"
+            >
+              Clear report
+            </button>
+          </Modal>
         );
       })()}
 
       {showClearConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-lg border border-stone-200 bg-white px-6 py-5 shadow-lg">
-            <p className="mb-1 text-sm font-semibold text-stone-900">Clear report?</p>
-            <p className="mb-5 text-sm leading-relaxed text-stone-500">
-              This will remove your uploaded report and all section data. Completed fixes will not be affected.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  clearLocalReport();
-                  setReport(null);
-                  setError(null);
-                  setShowClearConfirm(false);
-                }}
-                className="rounded-md border border-red-600 bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
-              >
-                Yes, Clear Report
-              </button>
-            </div>
+        <Modal onClose={() => setShowClearConfirm(false)}>
+          <p className="mb-1 text-sm font-semibold text-porch-text">Clear report?</p>
+          <p className="mb-5 text-sm leading-relaxed text-porch-text-secondary">
+            This will remove your uploaded report and all section data. Completed fixes will not be affected.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setShowClearConfirm(false)}
+              className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                clearLocalReport();
+                setReport(null);
+                setError(null);
+                setShowClearConfirm(false);
+              }}
+              className="btn-press rounded-[10px] border-none bg-red-600 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Yes, Clear Report
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
+
+      <ChatFAB
+        scope="global"
+        storageKey="global"
+        title="Ask Porchlight"
+        placeholder="Ask about your home..."
+        emptyStateText="Ask about anything in your home — your report, a past fix, or what to tackle next."
+        context={{
+          skillLevel: skillLevel ?? undefined,
+          location: location ?? undefined,
+          sections: allSectionRows.map((row) => ({
+            name: row.name,
+            issueCount: activeIssuesFor(row.name, row.slug).length,
+          })),
+        }}
+      />
     </div>
   );
 }
