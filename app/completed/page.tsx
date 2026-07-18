@@ -65,17 +65,28 @@ export default function CompletedPage() {
       const result: CompletedItem[] = [];
 
       for (const [, record] of Object.entries(completions)) {
-        const section = sections.find((s) => s.slug === record.slug);
-        if (!section) continue;
+        if (!report) continue;
 
-        let issue: Issue | undefined;
-        if (report) {
-          const reportSection = report.sections.find((s) => normalize(s.name) === normalize(section.label));
-          issue = reportSection?.issues[record.issueIndex];
-        }
+        // Find the section in the actual report data (slug-or-name match) —
+        // covers both standard sections and user-added custom sections.
+        const reportSection = report.sections.find(
+          (s) => s.slug === record.slug || normalize(s.name) === normalize(record.slug)
+        );
+        if (!reportSection) continue;
 
+        const issue = reportSection.issues[record.issueIndex];
         if (!issue) continue;
-        result.push({ issue, section, record, issueIndex: record.issueIndex });
+
+        // Prefer the hardcoded label/description if it's a standard section;
+        // otherwise build a display config from the report's own custom section.
+        const standardSection = sections.find((s) => s.slug === record.slug);
+        const sectionDisplay: SectionConfig = standardSection ?? {
+          slug: reportSection.slug ?? record.slug,
+          label: reportSection.name,
+          description: reportSection.description ?? "",
+        };
+
+        result.push({ issue, section: sectionDisplay, record, issueIndex: record.issueIndex });
       }
 
       result.sort((a, b) => new Date(b.record.completedAt).getTime() - new Date(a.record.completedAt).getTime());
@@ -94,10 +105,10 @@ export default function CompletedPage() {
     if (s !== null) totalSavings = (totalSavings ?? 0) + s;
   }
 
-  const usedSections = Array.from(new Set(items.map((x) => x.section.slug)));
+  const usedSections = Array.from(new Map(items.map((x) => [x.section.slug, x.section])).values());
   const sectionChips = [
     { slug: "all", label: "All" },
-    ...usedSections.map((slug) => ({ slug, label: sections.find((s) => s.slug === slug)?.label ?? slug })),
+    ...usedSections.map((s) => ({ slug: s.slug, label: s.label })),
   ];
 
   const q = search.trim().toLowerCase();
@@ -109,12 +120,16 @@ export default function CompletedPage() {
     return true;
   });
 
-  const groupedBySection = sections
-    .map((section) => ({ section, items: filtered.filter((x) => x.section.slug === section.slug) }))
+  const allSectionSlugs = Array.from(new Set(filtered.map((x) => x.section.slug)));
+  const groupedBySection = allSectionSlugs
+    .map((slug) => ({
+      section: items.find((x) => x.section.slug === slug)!.section,
+      items: filtered.filter((x) => x.section.slug === slug),
+    }))
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+    <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <header className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-porch-border bg-porch-surface px-5 py-3.5">
         <Link href="/" className="flex items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
           <ChevronLeftIcon size={15} />

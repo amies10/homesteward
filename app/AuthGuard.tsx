@@ -5,6 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
+// Reachable regardless of session state, with no redirect either way — a
+// password-recovery link establishes a real (if narrow-purpose) session via
+// detectSessionInUrl, so treating this as "public" would bounce it straight
+// to "/" via the signed-in-on-a-public-path redirect below, before the user
+// ever gets to set a new password.
+const NEUTRAL_PATHS = ["/reset-password"];
 
 function boot(msg: string) {
   (window as unknown as { __boot?: { push: (m: string) => void } }).__boot?.push(msg);
@@ -19,6 +25,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+    const isNeutral = NEUTRAL_PATHS.some((p) => pathname.startsWith(p));
+
+    if (isNeutral) {
+      setReady(true);
+      return;
+    }
     boot("authguard: checking session");
 
     // getSession() reads/refreshes the session from storage and can reject

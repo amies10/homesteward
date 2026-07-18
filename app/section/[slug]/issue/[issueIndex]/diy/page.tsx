@@ -494,7 +494,7 @@ export default function DIYPage({
   const liveTranslate = baseTranslate + (cardDragging ? cardDragDx : 0);
 
   return (
-    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+    <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-porch-border bg-porch-surface px-5 py-2.5">
         <Link href={`/section/${slug}/issue/${index}`} className="flex min-w-0 items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
           <ChevronLeftIcon size={15} />

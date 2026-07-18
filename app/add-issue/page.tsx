@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { sections, type Issue, type ParsedReport, type ReportSection } from "@/lib/sections";
+import { sections, normalize, type Issue, type ParsedReport, type ReportSection } from "@/lib/sections";
 import { loadLatestReport, updateReport, saveCompletion } from "@/lib/data";
 import Modal from "@/app/components/Modal";
 import { PlusIcon, XIcon } from "@/app/components/icons";
@@ -108,7 +108,9 @@ export default function AddIssuePage({
       photoBase64: photo ?? undefined,
     };
 
-    let idx = newReport.sections.findIndex((s) => s.slug === section);
+    let idx = newReport.sections.findIndex(
+      (s) => s.slug === section || normalize(s.name) === normalize(sectionConfig?.label ?? section)
+    );
     if (idx === -1) {
       newReport.sections.push({ name: sectionConfig?.label ?? section, slug: section, issues: [newIssue] });
       idx = newReport.sections.length - 1;
@@ -138,7 +140,7 @@ export default function AddIssuePage({
   if (!loaded) return null;
 
   return (
-    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+    <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-2.5 border-b border-porch-border bg-porch-surface px-5 py-3.5">
         <Link
           href={preselectedSection ? `/section/${preselectedSection}` : "/"}

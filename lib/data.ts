@@ -278,10 +278,25 @@ export async function updateReport(report: ParsedReport): Promise<void> {
   }
 }
 
-export function clearLocalReport(): void {
+export async function clearLocalReport(): Promise<void> {
+  const reportId = localStorage.getItem(REPORT_ID_KEY);
+
   localStorage.removeItem(REPORT_KEY);
   localStorage.removeItem(REPORT_ID_KEY);
   localStorage.removeItem(COMPLETIONS_KEY);
+  localStorage.removeItem(IGNORED_KEY);
+
+  if (!reportId) return;
+
+  try {
+    // Delete child rows first (FK constraint), then the report row
+    await supabase.from("completed_fixes").delete().eq("report_id", reportId);
+    await supabase.from("ignored_issues").delete().eq("report_id", reportId);
+    await supabase.from("issue_details").delete().eq("report_id", reportId);
+    await supabase.from("reports").delete().eq("id", reportId);
+  } catch (err) {
+    console.warn("[data] clearLocalReport: Supabase delete failed.", err);
+  }
 }
 
 // ── Completions ────────────────────────────────────────────────────────────

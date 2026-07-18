@@ -203,7 +203,7 @@ export default function Dashboard() {
   if (!profileChecked) return null;
 
   return (
-    <div className="min-h-screen bg-porch-bg pb-12 text-porch-text">
+    <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-[90px] text-porch-text">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-porch-border bg-porch-surface px-5 py-4">
         <Logo size={34} wordmarkSize={20} />
         <div className="flex items-center gap-2.5">
@@ -476,7 +476,7 @@ export default function Dashboard() {
         <Modal onClose={() => setShowClearConfirm(false)}>
           <p className="mb-1 text-sm font-semibold text-porch-text">Clear report?</p>
           <p className="mb-5 text-sm leading-relaxed text-porch-text-secondary">
-            This will remove your uploaded report and all section data. Completed fixes will not be affected.
+            This will permanently remove your uploaded report, its section data, and any completed fixes tied to it.
           </p>
           <div className="flex justify-end gap-2">
             <button
@@ -486,8 +486,8 @@ export default function Dashboard() {
               Cancel
             </button>
             <button
-              onClick={() => {
-                clearLocalReport();
+              onClick={async () => {
+                await clearLocalReport();
                 setReport(null);
                 setError(null);
                 setShowClearConfirm(false);

@@ -12,6 +12,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,6 +27,24 @@ export default function LoginPage() {
       return;
     }
     router.replace("/");
+  }
+
+  async function handleForgotPassword() {
+    if (!email) {
+      setError("Enter your email address above, then click Forgot password.");
+      return;
+    }
+    setResetLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setResetLoading(false);
+    if (error) {
+      setError(error.message);
+    } else {
+      setResetSent(true);
+    }
   }
 
   return (
@@ -60,9 +80,18 @@ export default function LoginPage() {
           className="mb-2 w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
         />
         <div className="mb-5 text-right">
-          <a href="#" className="text-[13px] text-porch-accent no-underline">
-            Forgot password?
-          </a>
+          {resetSent ? (
+            <span className="text-[13px] text-porch-text-secondary">Check your email for a reset link.</span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={resetLoading}
+              className="text-[13px] text-porch-accent no-underline disabled:opacity-60"
+            >
+              {resetLoading ? "Sending…" : "Forgot password?"}
+            </button>
+          )}
         </div>
 
         {error && (

@@ -201,7 +201,7 @@ export default function SectionPage({
   }
 
   return (
-    <div className="min-h-screen bg-porch-bg pb-10 text-porch-text">
+    <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-[90px] text-porch-text">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-porch-border bg-porch-surface px-5 py-[18px]">
         <Link href="/" className="flex items-center gap-1.5 text-sm text-porch-text-secondary no-underline">
           <ChevronLeftIcon />
