@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { StoredChatMessage } from "@/lib/sections";
 import AssistantAvatar from "./AssistantAvatar";
 import MicButton from "./MicButton";
+import { renderInlineMarkdown } from "./inlineMarkdown";
 import { CameraIcon, ChevronLeftIcon, SendIcon } from "./icons";
 
 interface Props {
@@ -130,7 +131,9 @@ export default function ChatFAB({ scope, storageKey, title, placeholder, emptySt
                         className="mb-2 max-h-48 rounded-lg object-contain"
                       />
                     )}
-                    {msg.text && <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>}
+                    {msg.text && (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
+                    )}
                   </div>
                 </div>
               ))}

@@ -1,19 +1,4 @@
-import React from "react";
-
-function renderInline(text: string): React.ReactNode[] {
-  // Handle **bold** inline
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={i} className="font-semibold text-porch-text">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return part;
-  });
-}
+import { renderInlineMarkdown } from "./inlineMarkdown";
 
 export default function MarkdownProse({ text }: { text: string }) {
   const blocks = text.trim().split(/\n{2,}/);
@@ -42,7 +27,7 @@ export default function MarkdownProse({ text }: { text: string }) {
                 .filter((l) => l.trim())
                 .map((l, j) => (
                   <li key={j} className="list-disc text-[13.5px] leading-relaxed text-porch-text-secondary">
-                    {renderInline(l.trim().replace(/^[-*]\s/, ""))}
+                    {renderInlineMarkdown(l.trim().replace(/^[-*]\s/, ""))}
                   </li>
                 ))}
             </ul>
@@ -53,7 +38,7 @@ export default function MarkdownProse({ text }: { text: string }) {
         const collapsed = trimmed.replace(/\n/g, " ");
         return (
           <p key={i} className="text-[14px] leading-[1.65] text-[#3A3532]">
-            {renderInline(collapsed)}
+            {renderInlineMarkdown(collapsed)}
           </p>
         );
       })}
