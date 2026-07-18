@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client";
+import Logo from "@/app/components/Logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,74 +28,64 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-stone-50 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
-            HomeSteward
-          </h1>
-          <p className="mt-1 text-sm text-stone-500">Sign in to your account</p>
+    <div className="flex min-h-screen flex-col items-center bg-porch-bg px-5 py-16">
+      <div className="mb-2.5 flex flex-col items-center">
+        <Logo size={40} wordmarkSize={26} />
+      </div>
+      <p className="mb-9 max-w-[300px] text-center text-[15px] leading-relaxed text-porch-text-secondary">
+        Welcome back. Let&apos;s see how your home&apos;s doing.
+      </p>
+
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-[380px] rounded-[18px] border border-porch-border bg-porch-surface px-6 py-[26px] shadow-[0_2px_10px_rgba(38,34,32,0.04)]"
+      >
+        <label className="mb-1.5 block text-[13.5px] font-semibold text-porch-text">Email</label>
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className="mb-[18px] w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+        />
+
+        <label className="mb-1.5 block text-[13.5px] font-semibold text-porch-text">Password</label>
+        <input
+          type="password"
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter your password"
+          className="mb-2 w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+        />
+        <div className="mb-5 text-right">
+          <a href="#" className="text-[13px] text-porch-accent no-underline">
+            Forgot password?
+          </a>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-lg border border-stone-200 bg-white px-6 py-6 shadow-sm"
+        {error && (
+          <p className="mb-4 rounded-[10px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+            {error}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="btn-press block w-full rounded-[10px] border-none bg-porch-accent py-[13px] text-center text-[15px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-stone-700">
-                Email
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-              />
-            </div>
+          {loading ? "Signing in…" : "Sign in"}
+        </button>
+      </form>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-stone-700">
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900 placeholder-stone-400 focus:border-stone-500 focus:outline-none"
-              />
-            </div>
-
-            {error && (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md border border-stone-800 bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-          </div>
-        </form>
-
-        <p className="mt-4 text-center text-sm text-stone-500">
-          Don&apos;t have an account?{" "}
-          <Link
-            href="/signup"
-            className="font-medium text-stone-900 underline underline-offset-2"
-          >
-            Sign up
-          </Link>
-        </p>
-      </div>
+      <p className="mt-5 text-[14px] text-porch-text-secondary">
+        New here?{" "}
+        <Link href="/signup" className="font-semibold text-porch-accent underline underline-offset-2">
+          Create an account
+        </Link>
+      </p>
     </div>
   );
 }
