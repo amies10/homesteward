@@ -1,13 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { XIcon } from "./icons";
 
 interface Props {
   collapsedHeight?: number;
   expandedHeight?: number;
+  /** Height to open at when first mounted. Defaults to collapsedHeight (peek only). */
+  initialHeight?: number;
   handleLabel?: React.ReactNode;
   persistentContent?: React.ReactNode;
+  /** Rendered inside the scrollable body when expanded. */
   children: React.ReactNode;
+  /** Rendered below children, pinned to the bottom (doesn't scroll) — e.g. a chat input row. */
+  footer?: React.ReactNode;
+  /** Shows a close (X) button in the handle row; tapping it doesn't trigger drag/tap-toggle. */
+  onClose?: () => void;
   zIndex?: number;
   position?: "fixed" | "absolute";
 }
@@ -22,25 +30,33 @@ interface Props {
  *
  * Pointer Events are the primary path (covers mouse + most modern mobile
  * browsers), with native touchstart/touchmove/touchend listeners layered on
- * top as a fallback: iOS Safari in particular has a history of not reliably
- * delivering pointermove during a drag unless the gesture is also fought off
- * via a non-passive touchmove + preventDefault, which React's JSX
- * onTouchMove can't do (React always attaches touch listeners as passive).
+ * top: React's JSX onTouchMove is always passive and can't preventDefault to
+ * stop the browser's native scroll from competing with the drag — a real gap
+ * on iOS Safari in particular.
+ *
+ * The whole handle row (not just the small pill) is the drag/tap target —
+ * when collapsed, its min-height fills the entire visible collapsed strip,
+ * since a target sized to just the pill's own content (~15-20px) is nearly
+ * impossible to hit reliably with a finger, even though a mouse cursor
+ * doesn't have that problem.
  */
 export default function BottomSheet({
   collapsedHeight = 96,
   expandedHeight,
+  initialHeight,
   handleLabel,
   persistentContent,
   children,
+  footer,
+  onClose,
   zIndex = 30,
   position = "fixed",
 }: Props) {
-  const [height, setHeightState] = useState(collapsedHeight);
+  const [height, setHeightState] = useState(initialHeight ?? collapsedHeight);
   const [dragging, setDragging] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
 
-  const heightRef = useRef(collapsedHeight);
+  const heightRef = useRef(initialHeight ?? collapsedHeight);
   const dragActive = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
@@ -53,6 +69,10 @@ export default function BottomSheet({
 
   function expandedH() {
     return expandedHeight ?? (typeof window !== "undefined" ? Math.round(window.innerHeight * 0.9) : 640);
+  }
+
+  function isNoDragTarget(target: EventTarget | null): boolean {
+    return target instanceof Element && !!target.closest("[data-nodrag]");
   }
 
   function beginDrag(clientY: number) {
@@ -82,6 +102,7 @@ export default function BottomSheet({
   }
 
   function onPointerDown(e: React.PointerEvent) {
+    if (isNoDragTarget(e.target)) return;
     const target = e.target as Element;
     try {
       target.setPointerCapture?.(e.pointerId);
@@ -100,6 +121,7 @@ export default function BottomSheet({
     if (!el) return;
 
     function onTouchStart(e: TouchEvent) {
+      if (isNoDragTarget(e.target)) return;
       beginDrag(e.touches[0].clientY);
     }
     function onTouchMove(e: TouchEvent) {
@@ -135,17 +157,30 @@ export default function BottomSheet({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        style={{ touchAction: "none", cursor: "grab" }}
-        className="flex shrink-0 flex-col items-center gap-2.5 pt-2.5"
+        style={{ touchAction: "none", cursor: "grab", minHeight: expanded ? undefined : collapsedHeight }}
+        className="relative flex shrink-0 flex-col items-center gap-2.5 pt-2.5"
       >
         <span className="h-1 w-9 rounded-full bg-porch-border-input" />
         {persistentContent}
         {expanded && handleLabel}
+        {onClose && (
+          <button
+            data-nodrag
+            onClick={onClose}
+            aria-label="Close"
+            className="btn-press absolute right-3 top-2.5 flex h-8 w-8 items-center justify-center rounded-full border-none bg-porch-accent-tint"
+          >
+            <XIcon size={15} color="#6B5F55" />
+          </button>
+        )}
       </div>
 
       {expanded && (
-        <div className="flex-1 overflow-y-auto px-5 pb-2 pt-3.5" style={{ touchAction: "pan-y" }}>
-          {children}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-5 pb-2 pt-3.5" style={{ touchAction: "pan-y" }}>
+            {children}
+          </div>
+          {footer}
         </div>
       )}
     </div>

@@ -15,6 +15,7 @@ import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
 import BottomSheet from "@/app/components/BottomSheet";
 import AssistantAvatar from "@/app/components/AssistantAvatar";
+import { renderInlineMarkdown } from "@/app/components/inlineMarkdown";
 import { CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
 
 export default function DIYPage({
@@ -299,9 +300,8 @@ export default function DIYPage({
     }
     function onTouchMove(e: TouchEvent) {
       if (!cardDragActive.current) return;
-      const clientX = e.touches[0].clientX;
-      if (Math.abs(clientX - cardStartX.current) > 6) e.preventDefault();
-      updateCardDrag(clientX);
+      e.preventDefault();
+      updateCardDrag(e.touches[0].clientX);
     }
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -346,7 +346,9 @@ export default function DIYPage({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`} alt="Uploaded" className="mb-2 max-h-48 rounded-lg object-contain" />
               )}
-              {msg.text && <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>}
+              {msg.text && (
+                <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
+              )}
             </div>
           </div>
         ))}
@@ -539,9 +541,11 @@ export default function DIYPage({
         </div>
       </div>
 
-      <BottomSheet handleLabel={<div className="px-5 pb-0 pt-1 text-[13px] font-semibold text-[#6B5F55]">What&apos;s the issue?</div>}>
+      <BottomSheet
+        handleLabel={<div className="px-5 pb-0 pt-1 text-[13px] font-semibold text-[#6B5F55]">What&apos;s the issue?</div>}
+        footer={chatInputRow}
+      >
         {chatBody}
-        {chatInputRow}
       </BottomSheet>
 
       {showRefineModal && (
@@ -612,7 +616,7 @@ export default function DIYPage({
             onPointerMove={onCardPointerMove}
             onPointerUp={endCardDrag}
             onPointerCancel={endCardDrag}
-            style={{ touchAction: "pan-y" }}
+            style={{ touchAction: "none" }}
             className="relative flex-1 overflow-hidden"
           >
             <div
@@ -708,9 +712,9 @@ export default function DIYPage({
                 <span className="flex-1 text-sm text-porch-text-secondary">Ask about this step…</span>
               </div>
             }
+            footer={chatInputRow}
           >
             {chatBody}
-            {chatInputRow}
           </BottomSheet>
 
           {showCongrats && (
