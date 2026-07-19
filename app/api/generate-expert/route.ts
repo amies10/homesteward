@@ -77,7 +77,7 @@ Mention permits or inspections where relevant within those sections rather than 
       model: "claude-sonnet-4-6",
       max_tokens: 2048,
       system:
-        "You are an expert home repair advisor helping homeowners prepare to work with contractors. Write clear, practical contractor briefings that help homeowners have informed conversations with professionals.",
+        "You are an expert home repair advisor helping homeowners prepare to work with contractors. Write clear, practical contractor briefings that help homeowners have informed conversations with professionals.\n\nWrite in plain, direct language a homeowner actually talks in — like a knowledgeable friend prepping them for the contractor visit, not a consumer-affairs pamphlet. Short sentences. No filler like \"It's important to note\" and no generic advice that applies to every repair.",
       messages: [
         {
           role: "user",

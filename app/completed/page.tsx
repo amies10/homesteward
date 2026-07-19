@@ -12,6 +12,7 @@ import {
 import { loadLatestReport, loadCompletions } from "@/lib/data";
 import Modal from "@/app/components/Modal";
 import { ChevronLeftIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
 
 const TYPE_LABEL: Record<Issue["severity"], string> = {
   safety: "Safety",
@@ -130,13 +131,16 @@ export default function CompletedPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
-      <header className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-porch-border bg-porch-surface px-5 py-3.5">
-        <Link href="/" className="flex items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
-          <ChevronLeftIcon size={15} />
-          Dashboard
-        </Link>
-        <span className="h-4 w-px bg-porch-border" />
-        <span className="text-[15px] font-semibold text-porch-text">Completed Fixes</span>
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-2.5 border-b border-porch-border bg-porch-surface px-5 py-3.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
+            <ChevronLeftIcon size={15} />
+            Dashboard
+          </Link>
+          <span className="h-4 w-px bg-porch-border" />
+          <span className="truncate text-[15px] font-semibold text-porch-text">Completed Fixes</span>
+        </div>
+        <HomeButton size={18} />
       </header>
 
       {!loaded ? null : total === 0 ? (

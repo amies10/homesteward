@@ -1,4 +1,5 @@
 import { supabase } from "./supabase-client";
+import { uploadReportPdf, removePaths } from "./storage";
 import {
   REPORT_KEY,
   COMPLETIONS_KEY,
@@ -17,13 +18,32 @@ async function getCurrentUserId(): Promise<string | null> {
   return session?.user.id ?? null;
 }
 
+export function getCurrentReportId(): string | null {
+  return localStorage.getItem(REPORT_ID_KEY);
+}
+
+// Stale per-issue caches are keyed only by slug/index, not report_id, so after
+// a re-upload they'd otherwise silently surface the previous report's DIY
+// plans, chat history, or contractor results for the same slug/index pair.
+function purgeStaleIssueCaches(): void {
+  const prefixes = ["homesteward_issue_details_", "homesteward_diy_", "homesteward_contractors_"];
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && prefixes.some((p) => key.startsWith(p))) keysToRemove.push(key);
+  }
+  keysToRemove.forEach((k) => localStorage.removeItem(k));
+}
+
 // ── Reports ────────────────────────────────────────────────────────────────
 
 export async function saveReport(
   report: ParsedReport,
-  filename: string
+  filename: string,
+  pdfFile?: File
 ): Promise<void> {
   localStorage.setItem(REPORT_KEY, JSON.stringify(report));
+  purgeStaleIssueCaches();
 
   const userId = await getCurrentUserId();
   console.log("[data] saveReport: attempting Supabase insert", { filename, sectionCount: report.sections.length });
@@ -40,6 +60,20 @@ export async function saveReport(
     }
     console.log("[data] saveReport: success", data);
     localStorage.setItem(REPORT_ID_KEY, data.id);
+
+    if (userId) {
+      const updates: Record<string, unknown> = {};
+      if (pdfFile) {
+        const path = await uploadReportPdf(userId, data.id, pdfFile);
+        if (path) updates.pdf_storage_path = path;
+      }
+      const profile = await loadUserProfile();
+      updates.location_used = profile?.location ?? null;
+      if (Object.keys(updates).length) {
+        const { error: updateError } = await supabase.from("reports").update(updates).eq("id", data.id);
+        if (updateError) console.warn("[data] saveReport: post-insert update failed", updateError);
+      }
+    }
   } catch (err) {
     console.warn("[data] saveReport: Supabase unavailable, localStorage only.", err);
   }
@@ -49,7 +83,7 @@ export async function loadLatestReport(): Promise<ParsedReport | null> {
   try {
     const { data, error } = await supabase
       .from("reports")
-      .select("id, raw_sections")
+      .select("id, raw_sections, pdf_storage_path, pdf_filename, location_used")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -57,7 +91,12 @@ export async function loadLatestReport(): Promise<ParsedReport | null> {
     if (error) throw error;
     if (!data) return null;
 
-    const report: ParsedReport = { sections: data.raw_sections };
+    const report: ParsedReport = {
+      sections: data.raw_sections,
+      pdfStoragePath: data.pdf_storage_path ?? undefined,
+      pdfFilename: data.pdf_filename ?? undefined,
+      locationUsed: data.location_used ?? undefined,
+    };
     localStorage.setItem(REPORT_KEY, JSON.stringify(report));
     localStorage.setItem(REPORT_ID_KEY, data.id);
     return report;
@@ -88,7 +127,7 @@ export async function loadIssueDetails(
     try {
       const { data, error } = await supabase
         .from("issue_details")
-        .select("materials_list, step_by_step_plan, contractor_briefing, user_observation")
+        .select("materials_list, step_by_step_plan, contractor_briefing, user_observation, photo_paths")
         .eq("report_id", reportId)
         .eq("section_slug", slug)
         .eq("issue_index", issueIndex)
@@ -101,6 +140,7 @@ export async function loadIssueDetails(
           stepByStepPlan: data.step_by_step_plan ?? undefined,
           contractorBriefing: data.contractor_briefing ?? undefined,
           userObservation: data.user_observation ?? undefined,
+          photoPaths: data.photo_paths ?? undefined,
         };
         console.log("[data] loadIssueDetails: loaded from Supabase", { slug, issueIndex, hasDiyPlan: !!details.stepByStepPlan?.length });
         localStorage.setItem(issueDetailsKey(slug, issueIndex), JSON.stringify(details));
@@ -160,6 +200,7 @@ export async function saveIssueDetails(
     step_by_step_plan: details.stepByStepPlan ?? null,
     contractor_briefing: details.contractorBriefing ?? null,
     user_observation: details.userObservation ?? null,
+    photo_paths: details.photoPaths ?? null,
     updated_at: new Date().toISOString(),
     user_id: userId,
   };
@@ -243,7 +284,7 @@ export async function loadUserProfile(): Promise<UserProfile | null> {
   try {
     const { data, error } = await supabase
       .from("user_profile")
-      .select("skill_level, location, address, onboarding_completed")
+      .select("skill_level, location, address, onboarding_completed, display_name, avatar_path")
       .maybeSingle();
 
     if (error) throw error;
@@ -254,12 +295,52 @@ export async function loadUserProfile(): Promise<UserProfile | null> {
       location: data.location,
       address: data.address ?? undefined,
       onboardingCompleted: data.onboarding_completed,
+      displayName: data.display_name ?? undefined,
+      avatarPath: data.avatar_path ?? undefined,
     };
     localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
     return profile;
   } catch {
     const stored = localStorage.getItem(USER_PROFILE_KEY);
     return stored ? (JSON.parse(stored) as UserProfile) : null;
+  }
+}
+
+// Narrow update for fields outside the onboarding/settings upsert flow — avoids
+// the whole-row upsert's clobber risk (see saveUserProfile's address handling).
+export async function updateProfileFields(partial: {
+  displayName?: string;
+  avatarPath?: string;
+  skillLevel?: UserProfile["skillLevel"];
+  location?: string;
+}): Promise<void> {
+  try {
+    const stored = localStorage.getItem(USER_PROFILE_KEY);
+    if (stored) {
+      const profile = JSON.parse(stored) as UserProfile;
+      if (partial.displayName !== undefined) profile.displayName = partial.displayName;
+      if (partial.avatarPath !== undefined) profile.avatarPath = partial.avatarPath;
+      if (partial.skillLevel !== undefined) profile.skillLevel = partial.skillLevel;
+      if (partial.location !== undefined) profile.location = partial.location;
+      localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+    }
+  } catch {}
+
+  const userId = await getCurrentUserId();
+  if (!userId) return;
+
+  const payload: Record<string, unknown> = {};
+  if (partial.displayName !== undefined) payload.display_name = partial.displayName;
+  if (partial.avatarPath !== undefined) payload.avatar_path = partial.avatarPath;
+  if (partial.skillLevel !== undefined) payload.skill_level = partial.skillLevel;
+  if (partial.location !== undefined) payload.location = partial.location;
+  if (Object.keys(payload).length === 0) return;
+
+  try {
+    const { error } = await supabase.from("user_profile").update(payload).eq("user_id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("[data] updateProfileFields: Supabase unavailable, localStorage only.", err);
   }
 }
 
@@ -278,6 +359,17 @@ export async function updateReport(report: ParsedReport): Promise<void> {
   }
 }
 
+export async function markReportLocationUsed(location: string): Promise<void> {
+  const reportId = localStorage.getItem(REPORT_ID_KEY);
+  if (!reportId) return;
+  try {
+    const { error } = await supabase.from("reports").update({ location_used: location }).eq("id", reportId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("[data] markReportLocationUsed: Supabase unavailable.", err);
+  }
+}
+
 export async function clearLocalReport(): Promise<void> {
   const reportId = localStorage.getItem(REPORT_ID_KEY);
 
@@ -285,8 +377,30 @@ export async function clearLocalReport(): Promise<void> {
   localStorage.removeItem(REPORT_ID_KEY);
   localStorage.removeItem(COMPLETIONS_KEY);
   localStorage.removeItem(IGNORED_KEY);
+  purgeStaleIssueCaches();
 
   if (!reportId) return;
+
+  const pathsToRemove: string[] = [];
+  try {
+    const { data: reportRow } = await supabase
+      .from("reports")
+      .select("pdf_storage_path")
+      .eq("id", reportId)
+      .maybeSingle();
+    if (reportRow?.pdf_storage_path) pathsToRemove.push(reportRow.pdf_storage_path);
+
+    const { data: issueRows } = await supabase
+      .from("issue_details")
+      .select("photo_paths")
+      .eq("report_id", reportId);
+    for (const row of issueRows ?? []) {
+      const paths = (row.photo_paths as string[] | null) ?? [];
+      pathsToRemove.push(...paths);
+    }
+  } catch (err) {
+    console.warn("[data] clearLocalReport: failed to collect storage paths.", err);
+  }
 
   try {
     // Delete child rows first (FK constraint), then the report row
@@ -296,6 +410,12 @@ export async function clearLocalReport(): Promise<void> {
     await supabase.from("reports").delete().eq("id", reportId);
   } catch (err) {
     console.warn("[data] clearLocalReport: Supabase delete failed.", err);
+  }
+
+  try {
+    await removePaths(pathsToRemove);
+  } catch (err) {
+    console.warn("[data] clearLocalReport: storage cleanup failed.", err);
   }
 }
 
@@ -329,6 +449,30 @@ export async function saveCompletion(record: CompletionRecord): Promise<void> {
     if (error) throw error;
   } catch (err) {
     console.warn("[data] saveCompletion: Supabase unavailable, localStorage only.", err);
+  }
+}
+
+// All-time "fixed by me" completions across every report the user has ever
+// uploaded (no report_id filter — RLS already scopes to the user), so earned
+// skill survives re-uploads and clearLocalReport.
+export async function loadAllMyCompletions(): Promise<CompletionRecord[]> {
+  try {
+    const { data, error } = await supabase
+      .from("completed_fixes")
+      .select("section_slug, issue_index, fixed_by, difficulty_rating, completed_at")
+      .eq("fixed_by", "me");
+    if (error) throw error;
+
+    return (data ?? []).map((row) => ({
+      slug: row.section_slug,
+      issueIndex: row.issue_index,
+      completedBy: "me" as const,
+      difficulty: row.difficulty_rating ?? undefined,
+      completedAt: row.completed_at,
+    }));
+  } catch (err) {
+    console.warn("[data] loadAllMyCompletions: Supabase unavailable.", err);
+    return [];
   }
 }
 

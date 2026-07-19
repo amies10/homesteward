@@ -13,12 +13,17 @@ import {
   clearLocalReport,
   updateReport,
   updateProfileAddress,
+  markReportLocationUsed,
 } from "@/lib/data";
+import { mergeParsedPropertyDetails } from "@/lib/property";
+import { supabase } from "@/lib/supabase-client";
+import { loadUserTasks, loadAllLogs, countDueOrOverdue } from "@/lib/maintenance";
 import Logo from "@/app/components/Logo";
 import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import SectionIcon from "@/app/components/SectionIcon";
-import { CheckIcon, ChevronRightIcon, PlusIcon, SearchIcon, SettingsIcon, UploadIcon, XIcon } from "@/app/components/icons";
+import RefreshEstimatesBanner from "@/app/components/RefreshEstimatesBanner";
+import { CalendarIcon, CheckIcon, ChevronRightIcon, PlusIcon, SearchIcon, SettingsIcon, UploadIcon, XIcon } from "@/app/components/icons";
 
 const SEVERITY_ORDER: Record<Issue["severity"], number> = {
   safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
@@ -64,6 +69,9 @@ export default function Dashboard() {
   const [addingSectionLoading, setAddingSectionLoading] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [refreshingEstimates, setRefreshingEstimates] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<string | null>(null);
+  const [maintenanceDueCount, setMaintenanceDueCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -83,6 +91,9 @@ export default function Dashboard() {
           setIgnored(ignored);
         }
       );
+      Promise.all([loadUserTasks(), loadAllLogs()])
+        .then(([tasks, logs]) => setMaintenanceDueCount(countDueOrOverdue(tasks, logs)))
+        .catch(() => {});
     });
   }, [router]);
 
@@ -154,6 +165,7 @@ export default function Dashboard() {
 
     const form = new FormData();
     form.append("file", file);
+    if (location) form.append("location", location);
 
     try {
       const res = await fetch("/api/parse-report", {
@@ -162,11 +174,14 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Upload failed");
-      setReport(data);
-      await saveReport(data, file.name);
+      setReport({ ...data, locationUsed: location ?? null });
+      await saveReport(data, file.name, file);
       if (data.propertyAddress) {
         setAddress(data.propertyAddress);
         await updateProfileAddress(data.propertyAddress);
+      }
+      if (data.propertyDetails) {
+        await mergeParsedPropertyDetails(data.propertyDetails);
       }
       setJustUploaded(true);
       setTimeout(() => setJustUploaded(false), 1800);
@@ -175,6 +190,64 @@ export default function Dashboard() {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRefreshEstimates() {
+    if (!report || !location) return;
+    setRefreshingEstimates(true);
+    setError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Not authenticated");
+
+      const workingSections = report.sections.map((s) => ({ ...s, issues: [...s.issues] }));
+
+      for (let si = 0; si < workingSections.length; si++) {
+        const section = workingSections[si];
+        if (!section.issues.length) continue;
+        setRefreshProgress(`Section ${si + 1} of ${workingSections.length}…`);
+
+        const res = await fetch("/api/refresh-estimates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            issues: section.issues.map((issue) => ({
+              title: issue.title,
+              description: issue.description,
+              severity: issue.severity,
+              recommendedAction: issue.recommendedAction,
+              costEstimateDIY: issue.costEstimateDIY,
+              costEstimatePro: issue.costEstimatePro,
+            })),
+            location,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to refresh estimates");
+
+        const estimates = json.estimates as Array<{
+          costEstimateDIY: string | null;
+          costEstimatePro: string | null;
+        }>;
+        section.issues = section.issues.map((issue, i) => ({
+          ...issue,
+          costEstimateDIY: estimates[i]?.costEstimateDIY ?? issue.costEstimateDIY,
+          costEstimatePro: estimates[i]?.costEstimatePro ?? issue.costEstimatePro,
+        }));
+      }
+
+      const updatedReport: ParsedReport = { ...report, sections: workingSections };
+      await updateReport(updatedReport);
+      await markReportLocationUsed(location);
+      setReport({ ...updatedReport, locationUsed: location });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh estimates");
+    } finally {
+      setRefreshingEstimates(false);
+      setRefreshProgress(null);
     }
   }
 
@@ -272,6 +345,27 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <div className="px-5 pb-1 pt-3.5">
+        <Link
+          href="/maintenance"
+          className="btn-press flex w-full items-center gap-3.5 rounded-2xl border border-porch-border bg-porch-surface px-4 py-4 text-inherit no-underline shadow-[0_1px_2px_rgba(38,34,32,0.03)]"
+        >
+          <div className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[11px] bg-porch-accent-tint">
+            <CalendarIcon />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15.5px] font-semibold text-porch-text">Maintenance Calendar</div>
+            <div className="mt-0.5 text-[13px] text-porch-text-secondary">Routine upkeep, on schedule</div>
+          </div>
+          {maintenanceDueCount > 0 && (
+            <span className="shrink-0 rounded-full bg-porch-urgent px-2.5 py-1 text-xs font-semibold text-white">
+              {maintenanceDueCount}
+            </span>
+          )}
+          <ChevronRightIcon size={16} />
+        </Link>
+      </div>
+
       <div className="flex items-center justify-between gap-2.5 px-5 pb-2.5 pt-7">
         <div className="font-display text-xl font-semibold text-porch-text">What are we working on?</div>
         <button
@@ -306,6 +400,14 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+      )}
+
+      {report && !report.locationUsed && location && (
+        <RefreshEstimatesBanner
+          onRefresh={handleRefreshEstimates}
+          refreshing={refreshingEstimates}
+          progress={refreshProgress}
+        />
       )}
 
       {!report ? (

@@ -13,12 +13,16 @@ import {
   type CompletionRecord,
 } from "@/lib/sections";
 import { loadLatestReport, loadIssueDetails, saveIssueDetails, saveCompletion } from "@/lib/data";
+import { loadToolbox, addTools, isToolHeuristic } from "@/lib/toolbox";
+import { signPaths } from "@/lib/storage";
+import ToolSuggestSheet from "@/app/components/ToolSuggestSheet";
 import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
 import BottomSheet from "@/app/components/BottomSheet";
 import AssistantAvatar from "@/app/components/AssistantAvatar";
 import { renderInlineMarkdown } from "@/app/components/inlineMarkdown";
 import { CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
 
 export default function DIYPage({
   params,
@@ -53,6 +57,8 @@ export default function DIYPage({
   const [stepGenerating, setStepGenerating] = useState<Record<number, boolean>>({});
   const [stepDetail, setStepDetail] = useState<Record<number, string>>({});
   const [showCongrats, setShowCongrats] = useState(false);
+  const [suggestedTools, setSuggestedTools] = useState<string[]>([]);
+  const [ownedTools, setOwnedTools] = useState<string[]>([]);
   const [finishing, setFinishing] = useState(false);
   const [finishPressed, setFinishPressed] = useState(false);
   const [cardDragDx, setCardDragDx] = useState(0);
@@ -91,6 +97,8 @@ export default function DIYPage({
     loadIssueDetails(slug, index).then((details) => {
       if (details) setIssueDetails(details);
     });
+
+    loadToolbox().then((tools) => setOwnedTools(tools.map((t) => t.toolName)));
 
     const sKey = diyKey(slug, index, "steps");
     const cKey = diyKey(slug, index, "chat");
@@ -154,6 +162,9 @@ export default function DIYPage({
           issueTitle: issue.title,
           issueDescription: issue.description,
           severity: issue.severity,
+          photoUrls: issueDetails?.photoPaths?.length
+            ? Object.values(await signPaths(issueDetails.photoPaths))
+            : undefined,
         }),
       });
 
@@ -193,6 +204,10 @@ export default function DIYPage({
           existingMaterialsList: issueDetails.materialsList,
           existingStepByStepPlan: issueDetails.stepByStepPlan,
           userObservation: issueDetails.userObservation,
+          ownedTools: ownedTools.length ? ownedTools : undefined,
+          photoUrls: issueDetails.photoPaths?.length
+            ? Object.values(await signPaths(issueDetails.photoPaths))
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -265,6 +280,17 @@ export default function DIYPage({
     };
     await saveCompletion(record);
     setFinishing(false);
+
+    if (issueDetails?.materialsList?.length) {
+      const owned = new Set((await loadToolbox()).map((t) => t.toolName.toLowerCase()));
+      const suggestions = issueDetails.materialsList
+        .filter((m) => (m.isTool ?? isToolHeuristic(m.item)) && !owned.has(m.item.toLowerCase()))
+        .map((m) => m.item);
+      if (suggestions.length) {
+        setSuggestedTools(suggestions);
+        return; // congrats shows once the suggestion sheet resolves
+      }
+    }
     setShowCongrats(true);
   }
 
@@ -500,9 +526,12 @@ export default function DIYPage({
           <ChevronLeftIcon size={15} />
           <span className="truncate">{issue?.title ?? "Issue"}</span>
         </Link>
-        <Link href="/settings" aria-label="Settings" className="flex shrink-0 items-center p-1">
-          <SettingsIcon size={18} />
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          {!workModeOpen && <HomeButton size={18} />}
+          <Link href="/settings" aria-label="Settings" className="flex items-center p-1">
+            <SettingsIcon size={18} />
+          </Link>
+        </div>
       </header>
 
       <div className="sticky top-[42px] z-[9] flex items-center justify-between gap-3 border-b border-porch-border bg-porch-bg px-5 py-3.5">
@@ -808,6 +837,21 @@ export default function DIYPage({
           >
             {chatBody}
           </BottomSheet>
+
+          {suggestedTools.length > 0 && (
+            <ToolSuggestSheet
+              tools={suggestedTools}
+              onConfirm={async (selected) => {
+                await addTools(selected, "suggested", `${slug}-${index}`);
+                setSuggestedTools([]);
+                setShowCongrats(true);
+              }}
+              onDismiss={() => {
+                setSuggestedTools([]);
+                setShowCongrats(true);
+              }}
+            />
+          )}
 
           {showCongrats && (
             <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-4.5 bg-porch-bg p-8 text-center">

@@ -5,33 +5,7 @@ import { useRouter } from "next/navigation";
 import { saveUserProfile, loadUserProfile, loadLatestReport } from "@/lib/data";
 import type { UserProfile } from "@/lib/sections";
 import Logo from "@/app/components/Logo";
-
-const SKILL_OPTIONS: Array<{
-  value: UserProfile["skillLevel"];
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "beginner",
-    label: "Beginner",
-    description: "I've never picked up a tool. I need guidance on everything.",
-  },
-  {
-    value: "some_experience",
-    label: "Some Experience",
-    description: "I can handle basic tasks like painting or fixing a leaky faucet.",
-  },
-  {
-    value: "experienced",
-    label: "Experienced",
-    description: "I'm comfortable with most repairs and have completed several projects.",
-  },
-  {
-    value: "expert",
-    label: "Expert",
-    description: "I can tackle almost anything — electrical, plumbing, structural.",
-  },
-];
+import SkillLevelPicker from "@/app/components/SkillLevelPicker";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -94,31 +68,7 @@ export default function OnboardingPage() {
                 : "This helps us tailor repair guidance and difficulty estimates to your skill level."}
             </p>
 
-            <div className="space-y-2.5">
-              {SKILL_OPTIONS.map((opt) => {
-                const selected = skillLevel === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => setSkillLevel(opt.value)}
-                    className={`btn-press w-full rounded-2xl border-[1.5px] px-5 py-4 text-left ${
-                      selected ? "border-porch-accent bg-porch-accent" : "border-porch-border bg-porch-surface"
-                    }`}
-                  >
-                    <p className={`text-[15px] font-semibold ${selected ? "text-white" : "text-porch-text"}`}>
-                      {opt.label}
-                    </p>
-                    <p
-                      className={`mt-0.5 text-[13px] leading-relaxed ${
-                        selected ? "text-[#F1D9E1]" : "text-porch-text-secondary"
-                      }`}
-                    >
-                      {opt.description}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+            <SkillLevelPicker value={skillLevel} onChange={setSkillLevel} />
 
             <div className="mt-8 flex justify-end">
               <button

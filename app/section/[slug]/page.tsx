@@ -17,13 +17,16 @@ import {
   loadCompletions,
   loadIgnored,
   loadUserProfile,
+  loadAllMyCompletions,
   saveIgnore,
   removeIgnore,
   updateReport,
 } from "@/lib/data";
+import { computeEffectiveSkill } from "@/lib/skill";
 import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import { ChevronLeftIcon, PencilIcon, PlusIcon, SettingsIcon, TrashIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
 
 const TYPE_LABEL: Record<Issue["severity"], string> = {
   safety: "Safety",
@@ -63,7 +66,7 @@ export default function SectionPage({
   const [report, setReport]           = useState<ParsedReport | null>(null);
   const [completions, setCompletions] = useState<Record<string, CompletionRecord>>({});
   const [ignored, setIgnored]         = useState<Record<string, true>>({});
-  const [userSkillLevel, setUserSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
+  const [effectiveSkillLevel, setEffectiveSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [loaded, setLoaded]           = useState(false);
 
   const [editingName, setEditingName] = useState(false);
@@ -81,15 +84,28 @@ export default function SectionPage({
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    Promise.all([loadLatestReport(), loadCompletions(), loadIgnored(), loadUserProfile()]).then(
-      ([r, c, ig, profile]) => {
-        if (r) setReport(r);
-        setCompletions(c);
-        setIgnored(ig);
-        if (profile) setUserSkillLevel(profile.skillLevel);
-        setLoaded(true);
+    Promise.all([
+      loadLatestReport(),
+      loadCompletions(),
+      loadIgnored(),
+      loadUserProfile(),
+      loadAllMyCompletions(),
+    ]).then(([r, c, ig, profile, myCompletions]) => {
+      if (r) setReport(r);
+      setCompletions(c);
+      setIgnored(ig);
+      if (profile) {
+        const lookupIssue = (issueSlug: string, index: number) => {
+          const cfg = sections.find((sc) => sc.slug === issueSlug);
+          const sec = r?.sections.find(
+            (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
+          );
+          return sec?.issues[index];
+        };
+        setEffectiveSkillLevel(computeEffectiveSkill(profile.skillLevel, myCompletions, lookupIssue).effective);
       }
-    );
+      setLoaded(true);
+    });
   }, []);
 
   const sectionConfig = sections.find((s) => s.slug === slug);
@@ -217,6 +233,7 @@ export default function SectionPage({
           Dashboard
         </Link>
         <div className="flex items-center gap-1">
+          <HomeButton />
           <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1.5">
             <SettingsIcon />
           </Link>
@@ -298,8 +315,8 @@ export default function SectionPage({
         sortedIssues.map(({ issue, i, done, isIgnored }) => {
           const dimmed = done || isIgnored;
           const skillTag =
-            !done && !isIgnored && userSkillLevel && issue.minimumSkillLevel
-              ? SKILL_RANK[userSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel]
+            !done && !isIgnored && effectiveSkillLevel && issue.minimumSkillLevel
+              ? SKILL_RANK[effectiveSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel]
                 ? { label: "DIY-friendly", cls: "text-porch-accent bg-porch-accent-tint" }
                 : { label: "Pro recommended", cls: "text-porch-pro-text bg-porch-pro-bg" }
               : null;

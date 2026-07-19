@@ -133,3 +133,21 @@ export function PlayIcon({ size = 14, color = "#FFFFFF", strokeWidth = 2, classN
     </svg>
   );
 }
+
+export function HomeIcon({ size = 20, color = "#6B5F55", strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M3 11l9-8 9 8" />
+      <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
+    </svg>
+  );
+}
+
+export function CalendarIcon({ size = 20, color = "#7D234A", strokeWidth = 1.6, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
+  );
+}

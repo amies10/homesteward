@@ -7,6 +7,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const location = (formData.get("location") as string | null)?.trim() || null;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -65,6 +66,19 @@ For each issue, assign a severity:
 Return a JSON object in this exact structure, with no other text:
 {
   "propertyAddress": "123 Main St, Anytown, CA 90210",
+  "propertyDetails": {
+    "yearBuilt": 1998,
+    "squareFeet": 2100,
+    "homeStyle": "Colonial",
+    "roofType": "Asphalt shingle",
+    "roofAgeYears": 12,
+    "hvacType": "Forced air gas furnace / central AC",
+    "hvacAgeYears": 8,
+    "foundationType": "Poured concrete basement",
+    "bedrooms": 3,
+    "bathrooms": 2.5,
+    "otherSpecs": [{ "label": "Water heater", "value": "50 gal gas, installed 2019" }]
+  },
   "sections": [
     {
       "name": "Section Name",
@@ -86,7 +100,11 @@ Return a JSON object in this exact structure, with no other text:
 
 For propertyAddress: extract the subject property address from the report if it appears (typically on the cover page, header, or client information section). Set to null if not found.
 
-For costEstimateDIY and costEstimatePro, provide realistic dollar ranges based on typical US market rates for the repair type and severity. Use en-dash (–) between the low and high values. If a repair is not DIY-appropriate (e.g. electrical panel work, structural repairs), set costEstimateDIY to null. If a professional is not typically needed (e.g. replacing a lightbulb), set costEstimatePro to null.
+For propertyDetails: extract every field only when the report actually states it (cover page, general property description, or system-specific sections). Set any field to null when the report doesn't mention it — never guess. otherSpecs is an array of any other notable property specs the report mentions that don't fit the named fields (e.g. garage, pool, deck, sump pump); return an empty array if none.
+
+Cost estimates must reflect real-world pricing in and around: ${location ?? "an unspecified location — use US national averages"}.
+costEstimatePro is the full invoice a homeowner would actually pay in that market: labor at local rates, parts and materials with contractor markup, a service-call/trip charge, and sales tax where applicable. Never quote bare labor rates — even a small pro visit rarely invoices under $150–$250 in most US markets.
+costEstimateDIY uses local big-box retail material prices, excluding tools. Use en-dash (–) between the low and high values. If a repair is not DIY-appropriate (e.g. electrical panel work, structural repairs), set costEstimateDIY to null. If a professional is not typically needed (e.g. replacing a lightbulb), set costEstimatePro to null.
 
 For minimumSkillLevel, assess the minimum skill level a homeowner needs to safely DIY this repair. Use these levels:
 - "beginner": No experience needed (e.g. cleaning gutters, replacing air filters, caulking)

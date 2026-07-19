@@ -17,7 +17,7 @@ export interface Issue {
   minimumSkillLevel?: SkillLevel | null;
   equipmentSpecs?: string[];
   // Populated on demand (not present in parse response):
-  materialsList?: Array<{ item: string; estimatedCost: string }>;
+  materialsList?: Array<{ item: string; estimatedCost: string; isTool?: boolean }>;
   stepByStepPlan?: string[];
   // User-managed fields:
   userAdded?: boolean;
@@ -34,9 +34,27 @@ export interface ReportSection {
   issues: Issue[];
 }
 
+export interface PropertyDetails {
+  yearBuilt?: number | null;
+  squareFeet?: number | null;
+  homeStyle?: string | null;
+  roofType?: string | null;
+  roofAgeYears?: number | null;
+  hvacType?: string | null;
+  hvacAgeYears?: number | null;
+  foundationType?: string | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  otherSpecs?: Array<{ label: string; value: string }>;
+}
+
 export interface ParsedReport {
   sections: ReportSection[];
   propertyAddress?: string | null;
+  pdfStoragePath?: string | null;
+  pdfFilename?: string | null;
+  locationUsed?: string | null;
+  propertyDetails?: PropertyDetails | null;
 }
 
 export interface CompletionRecord {
@@ -48,10 +66,11 @@ export interface CompletionRecord {
 }
 
 export interface IssueDetails {
-  materialsList?: Array<{ item: string; estimatedCost: string }>;
+  materialsList?: Array<{ item: string; estimatedCost: string; isTool?: boolean }>;
   stepByStepPlan?: string[];
   contractorBriefing?: string;
   userObservation?: string;
+  photoPaths?: string[];
 }
 
 export interface ContractorResult {
@@ -81,6 +100,8 @@ export interface UserProfile {
   location: string;
   address?: string;
   onboardingCompleted: boolean;
+  displayName?: string;
+  avatarPath?: string;
 }
 
 export function diyKey(

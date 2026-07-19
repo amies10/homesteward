@@ -40,11 +40,12 @@ function toAnthropicMessages(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { messages, issueTitle, issueDescription, severity } = body as {
+    const { messages, issueTitle, issueDescription, severity, photoUrls } = body as {
       messages: StoredChatMessage[];
       issueTitle: string;
       issueDescription: string;
       severity: string;
+      photoUrls?: string[];
     };
 
     if (!messages?.length) {
@@ -54,20 +55,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const anthropicMessages = toAnthropicMessages(messages);
+
+    // Attach issue-gallery photos to only the newest user turn, not every
+    // message in history, so they aren't re-sent (and re-billed) each call.
+    if (photoUrls?.length) {
+      const last = anthropicMessages[anthropicMessages.length - 1];
+      if (last?.role === "user") {
+        const imageBlocks: Anthropic.ImageBlockParam[] = photoUrls.map((url) => ({
+          type: "image",
+          source: { type: "url", url },
+        }));
+        last.content =
+          typeof last.content === "string"
+            ? [...imageBlocks, { type: "text", text: last.content }]
+            : [...imageBlocks, ...last.content];
+      }
+    }
+
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
-      system: `You are a home repair assistant helping a homeowner complete a specific repair task.
+      system: `You are helping a homeowner fix something in their house right now. The repair:
 
-The repair task is:
 Title: ${issueTitle}
 Description: ${issueDescription}
 Severity: ${severity}
 
-You may only discuss this specific repair task. If the user asks about anything unrelated to this repair, politely redirect them back to the task at hand.
+Voice: talk like a retired tradesman helping a neighbor — warm, plain, direct. You've done this job a hundred times and you're glad to walk them through it.
 
-Keep answers concise and practical — like advice from an experienced contractor. Use clear language, avoid jargon when possible, and focus on what the homeowner needs to know to complete the job safely and correctly. If the user shares a photo, describe what you see and give specific, actionable guidance based on it.`,
-      messages: toAnthropicMessages(messages),
+Rules:
+- Short answers. Two or three sentences covers most questions. Go longer only when they ask for a full walkthrough, and even then, no padding.
+- Plain words. "Shut off the water" not "ensure the water supply is deactivated."
+- Answer the question first. Add detail only if it changes what they should do.
+- Numbered steps only when order matters. Otherwise prose.
+- Never open with "Certainly!", "Great question!", or any preamble. Just answer.
+- No caveats they didn't ask for. Mention safety only when a step is genuinely dangerous, in one plain sentence.
+- Don't repeat what's already in their step-by-step plan.
+- A little personality is fine — "that valve's always in an awkward spot" — never at the cost of clarity.
+
+Stay on this repair. If they ask about something unrelated, warmly steer them back to the job.
+
+If they share a photo, say what you see and what it means for the fix — specifics, not descriptions.`,
+      messages: anthropicMessages,
     });
 
     const textBlock = response.content.find((b) => b.type === "text");

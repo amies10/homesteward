@@ -2,37 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { saveUserProfile, loadUserProfile } from "@/lib/data";
+import { saveUserProfile, loadUserProfile, loadLatestReport } from "@/lib/data";
 import type { UserProfile } from "@/lib/sections";
 import { supabase } from "@/lib/supabase-client";
-import { CheckIcon, ChevronLeftIcon } from "@/app/components/icons";
-
-const SKILL_OPTIONS: Array<{
-  value: UserProfile["skillLevel"];
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "beginner",
-    label: "Beginner",
-    description: "I've never picked up a tool. I need guidance on everything.",
-  },
-  {
-    value: "some_experience",
-    label: "Some Experience",
-    description: "I can handle basic tasks like painting or fixing a leaky faucet.",
-  },
-  {
-    value: "experienced",
-    label: "Experienced",
-    description: "I'm comfortable with most repairs and have completed several projects.",
-  },
-  {
-    value: "expert",
-    label: "Expert",
-    description: "I can tackle almost anything — electrical, plumbing, structural.",
-  },
-];
+import { getSignedUrl } from "@/lib/storage";
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
+import SkillLevelPicker from "@/app/components/SkillLevelPicker";
 
 export default function SettingsPage() {
   const [skillLevel, setSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
@@ -40,6 +16,9 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [pdfPath, setPdfPath] = useState<string | null>(null);
+  const [pdfFilename, setPdfFilename] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     loadUserProfile().then((profile) => {
@@ -49,7 +28,21 @@ export default function SettingsPage() {
       }
       setLoaded(true);
     });
+    loadLatestReport().then((report) => {
+      if (report?.pdfStoragePath) {
+        setPdfPath(report.pdfStoragePath);
+        setPdfFilename(report.pdfFilename ?? "inspection-report.pdf");
+      }
+    });
   }, []);
+
+  async function handleDownloadPdf() {
+    if (!pdfPath) return;
+    setDownloading(true);
+    const url = await getSignedUrl(pdfPath, 60, pdfFilename ?? undefined);
+    setDownloading(false);
+    if (url) window.open(url, "_blank");
+  }
 
   async function handleSave() {
     if (!skillLevel || !location.trim()) return;
@@ -71,9 +64,12 @@ export default function SettingsPage() {
           <ChevronLeftIcon size={15} />
           Dashboard
         </Link>
-        <button onClick={() => supabase.auth.signOut()} className="border-none bg-transparent p-0 text-[13.5px] font-medium text-porch-text-secondary">
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => supabase.auth.signOut()} className="border-none bg-transparent p-0 text-[13.5px] font-medium text-porch-text-secondary">
+            Sign out
+          </button>
+          <HomeButton size={18} />
+        </div>
       </header>
 
       <div className="px-5 pb-1 pt-5">
@@ -88,27 +84,7 @@ export default function SettingsPage() {
               How comfortable are you with home repairs?
             </div>
 
-            <div className="space-y-2.5">
-              {SKILL_OPTIONS.map((opt) => {
-                const selected = skillLevel === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => setSkillLevel(opt.value)}
-                    className={`btn-press mt-2.5 w-full rounded-2xl border-[1.5px] px-4 py-[15px] text-left ${
-                      selected ? "border-porch-accent bg-porch-accent" : "border-porch-border bg-porch-surface"
-                    }`}
-                  >
-                    <div className={`text-[15px] font-semibold ${selected ? "text-white" : "text-porch-text"}`}>
-                      {opt.label}
-                    </div>
-                    <div className={`mt-[3px] text-[13px] leading-relaxed ${selected ? "text-[#F1D9E1]" : "text-porch-text-secondary"}`}>
-                      {opt.description}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <SkillLevelPicker value={skillLevel} onChange={setSkillLevel} />
           </div>
 
           <div className="px-5 pb-1 pt-[26px]">
@@ -123,6 +99,39 @@ export default function SettingsPage() {
               placeholder="ZIP code"
               className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
             />
+          </div>
+
+          {pdfPath && (
+            <div className="px-5 pt-[26px]">
+              <div className="text-[15.5px] font-semibold text-porch-text">Inspection Report</div>
+              <div className="mb-2.5 mt-0.5 text-[13.5px] text-porch-text-secondary">
+                {pdfFilename}
+              </div>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={downloading}
+                className="btn-press w-full rounded-[10px] border border-porch-border-input bg-porch-surface py-3 text-[14.5px] font-medium text-porch-text-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {downloading ? "Preparing…" : "Download PDF"}
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-2.5 px-5 pt-[26px]">
+            <Link
+              href="/profile"
+              className="btn-press flex items-center justify-between rounded-2xl border border-porch-border bg-porch-surface px-4 py-4 no-underline"
+            >
+              <span className="text-[14.5px] font-semibold text-porch-text">Profile</span>
+              <ChevronRightIcon />
+            </Link>
+            <Link
+              href="/property"
+              className="btn-press flex items-center justify-between rounded-2xl border border-porch-border bg-porch-surface px-4 py-4 no-underline"
+            >
+              <span className="text-[14.5px] font-semibold text-porch-text">Property Details</span>
+              <ChevronRightIcon />
+            </Link>
           </div>
 
           <div className="px-5 pt-[26px]">

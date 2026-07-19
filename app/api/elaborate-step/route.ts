@@ -21,8 +21,12 @@ export async function POST(request: NextRequest) {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 512,
-      system:
-        "You are an experienced contractor giving a homeowner extra, practical detail on one step of a repair they're doing themselves. Keep it to 2-4 short sentences of plain prose — no headers, no lists. Cover things like: what \"good enough\" looks like, a common mistake to avoid, or a shortcut/alternative if they're missing a tool.",
+      system: `You are an old hand at home repair giving a neighbor a bit more detail on one step of a job.
+
+Job: ${issueTitle} — ${issueDescription}
+Step ${stepNumber} of ${totalSteps}: ${stepText}
+
+Give 2–4 short sentences of extra practical detail on this step only: the trick that makes it easier, the mistake people usually make, what "done right" looks like. Plain words. No preamble, no repeating the step back, no safety boilerplate unless this step is genuinely dangerous.`,
       messages: [
         {
           role: "user",

@@ -4,9 +4,12 @@ import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sections, normalize, type Issue, type ParsedReport, type ReportSection } from "@/lib/sections";
-import { loadLatestReport, updateReport, saveCompletion } from "@/lib/data";
+import { loadLatestReport, updateReport, saveCompletion, saveIssueDetails, getCurrentReportId } from "@/lib/data";
+import { uploadIssuePhoto } from "@/lib/storage";
+import { supabase } from "@/lib/supabase-client";
 import Modal from "@/app/components/Modal";
 import { PlusIcon, XIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
 
 type AddType = "issue" | "enhancement";
 
@@ -26,6 +29,7 @@ export default function AddIssuePage({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -55,6 +59,7 @@ export default function AddIssuePage({
   const sectionLabel = sectionChips.find((s) => s.slug === section)?.label ?? section;
 
   function handleFile(file: File) {
+    setPhotoFile(file);
     const reader = new FileReader();
     reader.onload = () => setPhoto(reader.result as string);
     reader.readAsDataURL(file);
@@ -99,13 +104,20 @@ export default function AddIssuePage({
     const baseReport: ParsedReport = report ?? { sections: [] };
     const newReport: ParsedReport = JSON.parse(JSON.stringify(baseReport));
 
+    const reportId = getCurrentReportId();
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    const canUseStorage = !!(reportId && userId && photoFile);
+
     const newIssue: Issue = {
       title: title.trim(),
       description: description.trim() || (type === "issue" ? "Logged by homeowner." : "Upgrade logged by homeowner."),
       severity: type === "issue" ? "repair" : "improvement",
       recommendedAction: description.trim(),
       userAdded: true,
-      photoBase64: photo ?? undefined,
+      // Storage-backed photos go through issue_details.photoPaths instead;
+      // base64 stays only as the offline/unauthenticated fallback.
+      photoBase64: canUseStorage ? undefined : photo ?? undefined,
     };
 
     let idx = newReport.sections.findIndex(
@@ -120,6 +132,11 @@ export default function AddIssuePage({
     const newIssueIndex = newReport.sections[idx].issues.length - 1;
 
     await updateReport(newReport);
+
+    if (canUseStorage) {
+      const path = await uploadIssuePhoto(userId, reportId, section, newIssueIndex, photoFile);
+      if (path) await saveIssueDetails(section, newIssueIndex, { photoPaths: [path] });
+    }
 
     if (type === "enhancement") {
       await saveCompletion({
@@ -150,7 +167,9 @@ export default function AddIssuePage({
           Cancel
         </Link>
         <span className="text-[15px] font-semibold text-porch-text">Log Something New</span>
-        <span className="w-[46px]" />
+        <div className="flex w-[46px] justify-end">
+          <HomeButton size={18} />
+        </div>
       </header>
 
       <div className="px-5 pb-1.5 pt-5">
@@ -250,7 +269,7 @@ export default function AddIssuePage({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={photo} alt="" className="max-h-56 w-full rounded-2xl object-cover" />
             <button
-              onClick={() => setPhoto(null)}
+              onClick={() => { setPhoto(null); setPhotoFile(null); }}
               aria-label="Remove photo"
               className="btn-press absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full border-none bg-[rgba(38,34,32,0.55)]"
             >

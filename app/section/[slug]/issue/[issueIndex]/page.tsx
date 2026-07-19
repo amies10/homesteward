@@ -8,6 +8,7 @@ import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import { ChevronDownIcon, ChevronLeftIcon, SettingsIcon } from "@/app/components/icons";
+import HomeButton from "@/app/components/HomeButton";
 import {
   sections,
   normalize,
@@ -24,11 +25,19 @@ import {
   loadLatestReport,
   loadCompletions,
   loadUserProfile,
+  loadAllMyCompletions,
   loadIssueDetails,
   saveIssueDetails,
   saveCompletion,
   updateReport,
+  getCurrentReportId,
 } from "@/lib/data";
+import { computeEffectiveSkill } from "@/lib/skill";
+import { loadToolbox, addTools, isToolHeuristic } from "@/lib/toolbox";
+import ToolSuggestSheet from "@/app/components/ToolSuggestSheet";
+import PhotoGallery from "@/app/components/PhotoGallery";
+import { uploadIssuePhoto, removePaths, signPaths } from "@/lib/storage";
+import { supabase } from "@/lib/supabase-client";
 
 const TYPE_LABEL: Record<Issue["severity"], string> = {
   safety: "Safety",
@@ -53,6 +62,7 @@ export default function IssuePage({
 
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [userSkillLevel, setUserSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
+  const [effectiveSkillLevel, setEffectiveSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [userLocation, setUserLocation] = useState<string | null>(null);
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [contractors, setContractors] = useState<ContractorResult[]>([]);
@@ -91,22 +101,37 @@ export default function IssuePage({
   const [moveTarget, setMoveTarget] = useState("");
   const [moving, setMoving] = useState(false);
 
+  const [suggestedTools, setSuggestedTools] = useState<string[]>([]);
+  const [ownedTools, setOwnedTools] = useState<string[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
   useEffect(() => {
     Promise.all([
       loadLatestReport(),
       loadCompletions(),
       loadUserProfile(),
       loadIssueDetails(slug, index),
-    ]).then(([r, completions, profile, details]) => {
+      loadAllMyCompletions(),
+    ]).then(([r, completions, profile, details, myCompletions]) => {
       if (r) setReport(r);
       if (completions[`${slug}-${index}`]) setSaved(true);
       if (profile) {
         setUserSkillLevel(profile.skillLevel);
         if (profile.location) setUserLocation(profile.location);
+        const lookupIssue = (issueSlug: string, idx: number) => {
+          const cfg = sections.find((sc) => sc.slug === issueSlug);
+          const sec = r?.sections.find(
+            (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
+          );
+          return sec?.issues[idx];
+        };
+        setEffectiveSkillLevel(computeEffectiveSkill(profile.skillLevel, myCompletions, lookupIssue).effective);
       }
       if (details) setIssueDetails(details);
       setLoaded(true);
     });
+
+    loadToolbox().then((tools) => setOwnedTools(tools.map((t) => t.toolName)));
 
     try {
       const stored = localStorage.getItem(contractorsKey(slug, index));
@@ -147,14 +172,14 @@ export default function IssuePage({
   const isProOnly = !issue.costEstimateDIY;
   const hasSkillMismatch =
     !isProOnly &&
-    !!userSkillLevel &&
+    !!effectiveSkillLevel &&
     !!issue.minimumSkillLevel &&
-    SKILL_RANK[userSkillLevel] < SKILL_RANK[issue.minimumSkillLevel];
+    SKILL_RANK[effectiveSkillLevel] < SKILL_RANK[issue.minimumSkillLevel];
   const withinSkill =
     !isProOnly &&
-    !!userSkillLevel &&
+    !!effectiveSkillLevel &&
     !!issue.minimumSkillLevel &&
-    SKILL_RANK[userSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel];
+    SKILL_RANK[effectiveSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel];
   const showDiyWarning = (isProOnly || hasSkillMismatch) && !diyUnlocked;
 
   const hasDiyPlan = !!(issueDetails?.materialsList?.length || issueDetails?.stepByStepPlan?.length);
@@ -168,6 +193,35 @@ export default function IssuePage({
       .filter((s) => s.userAdded && s.slug && s.slug !== slug)
       .map((s) => ({ slug: s.slug!, label: s.name })) ?? []),
   ];
+
+  async function handleAddPhoto(file: File) {
+    const reportId = getCurrentReportId();
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user.id;
+    if (!reportId || !userId) return;
+
+    setUploadingPhoto(true);
+    const path = await uploadIssuePhoto(userId, reportId, slug, index, file);
+    if (path) {
+      const updated: IssueDetails = {
+        ...issueDetails,
+        photoPaths: [...(issueDetails?.photoPaths ?? []), path],
+      };
+      setIssueDetails(updated);
+      await saveIssueDetails(slug, index, updated);
+    }
+    setUploadingPhoto(false);
+  }
+
+  async function handleRemovePhoto(path: string) {
+    const updated: IssueDetails = {
+      ...issueDetails,
+      photoPaths: (issueDetails?.photoPaths ?? []).filter((p) => p !== path),
+    };
+    setIssueDetails(updated);
+    await saveIssueDetails(slug, index, updated);
+    await removePaths([path]);
+  }
 
   async function handleGenerateDiy() {
     if (!issue) return;
@@ -185,6 +239,11 @@ export default function IssuePage({
           equipmentSpecs: issue.equipmentSpecs,
           costEstimateDIY: issue.costEstimateDIY,
           userObservation: issueDetails?.userObservation,
+          skillLevel: effectiveSkillLevel ?? undefined,
+          ownedTools: ownedTools.length ? ownedTools : undefined,
+          photoUrls: issueDetails?.photoPaths?.length
+            ? Object.values(await signPaths(issueDetails.photoPaths))
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -276,6 +335,14 @@ export default function IssuePage({
     await saveCompletion(record);
     setSaved(true);
     setShowForm(false);
+
+    if (completedBy === "me" && issueDetails?.materialsList?.length) {
+      const owned = new Set((await loadToolbox()).map((t) => t.toolName.toLowerCase()));
+      const suggestions = issueDetails.materialsList
+        .filter((m) => (m.isTool ?? isToolHeuristic(m.item)) && !owned.has(m.item.toLowerCase()))
+        .map((m) => m.item);
+      if (suggestions.length) setSuggestedTools(suggestions);
+    }
   }
 
   async function handleRefineBriefing() {
@@ -378,6 +445,11 @@ export default function IssuePage({
           equipmentSpecs: issue.equipmentSpecs,
           costEstimateDIY: issue.costEstimateDIY,
           userObservation: issueDetails.userObservation,
+          skillLevel: effectiveSkillLevel ?? undefined,
+          ownedTools: ownedTools.length ? ownedTools : undefined,
+          photoUrls: issueDetails?.photoPaths?.length
+            ? Object.values(await signPaths(issueDetails.photoPaths))
+            : undefined,
         }),
       });
       const data = await res.json();
@@ -477,9 +549,12 @@ export default function IssuePage({
           <ChevronLeftIcon />
           <span className="truncate">{from === "completed" ? "Completed Fixes" : sectionDisplayName}</span>
         </Link>
-        <Link href="/settings" aria-label="Settings" className="flex shrink-0 items-center justify-center p-1">
-          <SettingsIcon />
-        </Link>
+        <div className="flex shrink-0 items-center gap-1">
+          <HomeButton />
+          <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1">
+            <SettingsIcon />
+          </Link>
+        </div>
       </header>
 
       <div className="px-5 pb-1.5 pt-[22px]">
@@ -503,6 +578,19 @@ export default function IssuePage({
           {issue.notes && (
             <p className="mt-3 text-xs italic leading-relaxed text-porch-text-tertiary">Note: {issue.notes}</p>
           )}
+        </div>
+
+        {/* Photos */}
+        <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
+          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Photos</p>
+          <div className="mt-2.5">
+            <PhotoGallery
+              paths={issueDetails?.photoPaths ?? []}
+              onAdd={handleAddPhoto}
+              onRemove={handleRemovePhoto}
+              uploading={uploadingPhoto}
+            />
+          </div>
         </div>
 
         {/* Your observations */}
@@ -938,6 +1026,17 @@ export default function IssuePage({
         </Modal>
       )}
 
+      {suggestedTools.length > 0 && (
+        <ToolSuggestSheet
+          tools={suggestedTools}
+          onConfirm={async (selected) => {
+            await addTools(selected, "suggested", `${slug}-${index}`);
+            setSuggestedTools([]);
+          }}
+          onDismiss={() => setSuggestedTools([])}
+        />
+      )}
+
       <ChatFAB
         scope="issue"
         storageKey={`issue_${slug}_${index}`}
@@ -949,6 +1048,7 @@ export default function IssuePage({
           issueDescription: issue.description,
           issueSeverity: issue.severity,
           skillLevel: userSkillLevel ?? undefined,
+          effectiveSkillLevel: effectiveSkillLevel ?? undefined,
           location: userLocation ?? undefined,
         }}
       />
