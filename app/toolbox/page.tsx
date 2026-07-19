@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AppHeader from "@/app/components/AppHeader";
-import { PlusIcon, TrashIcon } from "@/app/components/icons";
+import { PlusIcon, SearchIcon, TrashIcon, XIcon } from "@/app/components/icons";
 import { loadToolbox, addTools, removeTool, type ToolboxItem } from "@/lib/toolbox";
 
 export default function ToolboxPage() {
@@ -10,6 +10,7 @@ export default function ToolboxPage() {
   const [loaded, setLoaded] = useState(false);
   const [newTool, setNewTool] = useState("");
   const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     loadToolbox().then((data) => {
@@ -33,6 +34,9 @@ export default function ToolboxPage() {
     await removeTool(id);
   }
 
+  const query = search.trim().toLowerCase();
+  const visibleTools = query ? tools.filter((t) => t.toolName.toLowerCase().includes(query)) : tools;
+
   return (
     <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <AppHeader backHref="/profile" backLabel="Profile" />
@@ -46,13 +50,41 @@ export default function ToolboxPage() {
 
       {loaded && (
         <>
-          <div className="mx-5 mt-4 space-y-2">
+          {tools.length > 0 && (
+            <div className="mx-5 mt-4">
+              <div className="flex items-center gap-2 rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5">
+                <SearchIcon size={15} />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search tools..."
+                  className="flex-1 border-none bg-transparent text-sm text-porch-text outline-none placeholder:text-porch-text-tertiary"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                    className="flex items-center p-0.5 text-porch-text-tertiary"
+                  >
+                    <XIcon size={14} color="#A99C8B" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="mx-5 mt-2.5 space-y-2">
             {tools.length === 0 ? (
               <div className="rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
                 <p className="text-sm text-porch-text-secondary">No tools yet. Add one below.</p>
               </div>
+            ) : visibleTools.length === 0 ? (
+              <div className="rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
+                <p className="text-sm text-porch-text-secondary">No tools match &quot;{search.trim()}&quot;.</p>
+              </div>
             ) : (
-              tools.map((tool) => (
+              visibleTools.map((tool) => (
                 <div
                   key={tool.id}
                   className="flex items-center justify-between rounded-2xl border border-porch-border bg-porch-surface px-4 py-3.5"

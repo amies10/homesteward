@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase-client";
 import Modal from "@/app/components/Modal";
 import { PlusIcon, XIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 
 type AddType = "issue" | "enhancement";
 
@@ -167,7 +168,8 @@ export default function AddIssuePage({
           Cancel
         </Link>
         <span className="text-[15px] font-semibold text-porch-text">Log Something New</span>
-        <div className="flex w-[46px] justify-end">
+        <div className="flex items-center justify-end gap-1">
+          <CalendarButton size={18} />
           <HomeButton size={18} />
         </div>
       </header>

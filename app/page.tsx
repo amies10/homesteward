@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sections, normalize, type ParsedReport, type Issue, type ReportSection } from "@/lib/sections";
 import {
-  saveReport,
   loadLatestReport,
   loadCompletions,
   loadIgnored,
   loadUserProfile,
   clearLocalReport,
   updateReport,
-  updateProfileAddress,
   markReportLocationUsed,
 } from "@/lib/data";
-import { mergeParsedPropertyDetails } from "@/lib/property";
 import { supabase } from "@/lib/supabase-client";
 import { loadUserTasks, loadAllLogs, countDueOrOverdue } from "@/lib/maintenance";
 import Logo from "@/app/components/Logo";
@@ -23,7 +20,7 @@ import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import SectionIcon from "@/app/components/SectionIcon";
 import RefreshEstimatesBanner from "@/app/components/RefreshEstimatesBanner";
-import { CalendarIcon, CheckIcon, ChevronRightIcon, PlusIcon, SearchIcon, SettingsIcon, UploadIcon, XIcon } from "@/app/components/icons";
+import { CalendarIcon, ChevronRightIcon, PlusIcon, SearchIcon, SettingsIcon, XIcon } from "@/app/components/icons";
 
 const SEVERITY_ORDER: Record<Issue["severity"], number> = {
   safety: 0, repair: 1, maintenance: 2, improvement: 3, fyi: 4,
@@ -58,8 +55,6 @@ export default function Dashboard() {
   const [report, setReport] = useState<ParsedReport | null>(null);
   const [completions, setCompletions] = useState<Record<string, unknown>>({});
   const [ignored, setIgnored] = useState<Record<string, true>>({});
-  const [loading, setLoading] = useState(false);
-  const [justUploaded, setJustUploaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -72,7 +67,6 @@ export default function Dashboard() {
   const [refreshingEstimates, setRefreshingEstimates] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<string | null>(null);
   const [maintenanceDueCount, setMaintenanceDueCount] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadUserProfile().then((profile) => {
@@ -156,41 +150,6 @@ export default function Dashboard() {
     setNewSectionName("");
     setNewSectionDesc("");
     setAddingSectionLoading(false);
-  }
-
-  async function handleFile(file: File) {
-    setLoading(true);
-    setError(null);
-    setReport(null);
-
-    const form = new FormData();
-    form.append("file", file);
-    if (location) form.append("location", location);
-
-    try {
-      const res = await fetch("/api/parse-report", {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      setReport({ ...data, locationUsed: location ?? null });
-      await saveReport(data, file.name, file);
-      if (data.propertyAddress) {
-        setAddress(data.propertyAddress);
-        await updateProfileAddress(data.propertyAddress);
-      }
-      if (data.propertyDetails) {
-        await mergeParsedPropertyDetails(data.propertyDetails);
-      }
-      setJustUploaded(true);
-      setTimeout(() => setJustUploaded(false), 1800);
-      setShowSummaryModal(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
   }
 
   async function handleRefreshEstimates() {
@@ -283,31 +242,6 @@ export default function Dashboard() {
           <Link href="/completed" className="text-[13px] font-semibold text-porch-text-secondary no-underline">
             Completed Fixes
           </Link>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleFile(file);
-              e.target.value = "";
-            }}
-          />
-          <button
-            onClick={() => inputRef.current?.click()}
-            disabled={loading}
-            aria-label="Upload new report"
-            className="btn-press relative flex h-[34px] w-[34px] items-center justify-center rounded-[9px] border-none bg-porch-accent-tint disabled:opacity-60"
-          >
-            {justUploaded ? (
-              <CheckIcon size={16} color="#3E7A4F" strokeWidth={2.4} />
-            ) : loading ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-porch-accent border-t-transparent" />
-            ) : (
-              <UploadIcon size={16} />
-            )}
-          </button>
           <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1.5">
             <SettingsIcon size={22} />
           </Link>
@@ -413,7 +347,11 @@ export default function Dashboard() {
       {!report ? (
         <div className="mx-5 mt-2 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
           <p className="text-sm text-porch-text-secondary">
-            Upload an inspection report using the icon above to get started.
+            Head to{" "}
+            <Link href="/settings" className="text-porch-accent underline underline-offset-2">
+              Settings
+            </Link>{" "}
+            to upload your inspection report and get started.
           </p>
         </div>
       ) : searchQuery && visibleSectionRows.length === 0 ? (

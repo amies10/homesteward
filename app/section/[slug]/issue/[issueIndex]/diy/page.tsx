@@ -23,6 +23,7 @@ import AssistantAvatar from "@/app/components/AssistantAvatar";
 import { renderInlineMarkdown } from "@/app/components/inlineMarkdown";
 import { CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 
 export default function DIYPage({
   params,
@@ -527,7 +528,12 @@ export default function DIYPage({
           <span className="truncate">{issue?.title ?? "Issue"}</span>
         </Link>
         <div className="flex shrink-0 items-center gap-1">
-          {!workModeOpen && <HomeButton size={18} />}
+          {!workModeOpen && (
+            <>
+              <CalendarButton size={18} />
+              <HomeButton size={18} />
+            </>
+          )}
           <Link href="/settings" aria-label="Settings" className="flex items-center p-1">
             <SettingsIcon size={18} />
           </Link>

@@ -51,13 +51,16 @@ ${existingBriefing}
 The homeowner has this additional context or feedback:
 "${feedback}"
 
-Revise the briefing to incorporate their feedback. Keep the same format: four sections, each starting with a "### " markdown header using exactly these titles, each followed by one short plain-prose paragraph (no bullet lists):
+Revise the briefing to incorporate their feedback. Keep the same format: four sections, each starting with a "### " markdown header using exactly these titles, followed by a blank line and then one short plain-prose paragraph (no bullet lists):
 ### What the contractor will assess and do
-### Questions to ask before hiring
-### What a proper repair looks like
-### Red flags to watch for
 
-Return only the revised briefing text.`
+Plain paragraph text here, no bold.
+
+### Questions to ask before hiring
+
+Plain paragraph text here, no bold.
+
+Do not bold, italicize, or otherwise markdown-format any of the body text — only the "### " header lines use markdown. Return only the revised briefing text.`
       : `Write a contractor briefing for the following home inspection issue. This is for a homeowner to read before hiring and meeting with a professional.
 
 Issue: ${issueTitle}
@@ -65,13 +68,24 @@ Description: ${issueDescription}
 Severity: ${severity}
 Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nTypical equipment involved: ${equipmentSpecs.join(", ")}` : ""}${costEstimatePro ? `\nEstimated professional cost: ${costEstimatePro}` : ""}${observationLine}
 
-Write the briefing as exactly four sections, each starting with a "### " markdown header using exactly these titles, each followed by one short plain-prose paragraph (no bullet lists, no sub-headers):
+Write the briefing as exactly four sections, each starting with a "### " markdown header using exactly these titles, followed by a blank line and then one short plain-prose paragraph (no bullet lists, no sub-headers):
 ### What the contractor will assess and do
+
+Plain paragraph text here, no bold.
+
 ### Questions to ask before hiring
+
+Plain paragraph text here, no bold.
+
 ### What a proper repair looks like
+
+Plain paragraph text here, no bold.
+
 ### Red flags to watch for
 
-Mention permits or inspections where relevant within those sections rather than as a separate one. Keep it practical and direct — 220 to 380 words total.`;
+Plain paragraph text here, no bold.
+
+Do not bold, italicize, or otherwise markdown-format any of the body text — only the "### " header lines use markdown. Mention permits or inspections where relevant within those sections rather than as a separate one. Keep it practical and direct — 220 to 380 words total.`;
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",

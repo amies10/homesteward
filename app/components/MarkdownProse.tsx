@@ -9,11 +9,21 @@ export default function MarkdownProse({ text }: { text: string }) {
         const trimmed = block.trim();
 
         if (trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
-          const label = trimmed.replace(/^#{1,3}\s/, "");
+          // A header and its paragraph sometimes arrive without a blank line
+          // between them, collapsing into one block — only the first line is
+          // the header; anything after it is body text, not part of the title.
+          const lines = trimmed.split("\n");
+          const label = lines[0].replace(/^#{1,3}\s/, "");
+          const rest = lines.slice(1).join(" ").trim();
           return (
-            <p key={i} className="text-[14.5px] font-semibold text-porch-text">
-              {label}
-            </p>
+            <div key={i}>
+              <p className="text-[14.5px] font-semibold text-porch-text">{label}</p>
+              {rest && (
+                <p className="mt-1.5 text-[14px] leading-[1.65] text-[#3A3532]">
+                  {renderInlineMarkdown(rest)}
+                </p>
+              )}
+            </div>
           );
         }
 

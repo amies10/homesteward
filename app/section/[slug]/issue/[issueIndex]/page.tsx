@@ -9,6 +9,7 @@ import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import { ChevronDownIcon, ChevronLeftIcon, SettingsIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 import {
   sections,
   normalize,
@@ -550,6 +551,7 @@ export default function IssuePage({
           <span className="truncate">{from === "completed" ? "Completed Fixes" : sectionDisplayName}</span>
         </Link>
         <div className="flex shrink-0 items-center gap-1">
+          <CalendarButton />
           <HomeButton />
           <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1">
             <SettingsIcon />

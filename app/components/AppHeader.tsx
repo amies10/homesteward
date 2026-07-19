@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 
 interface Props {
   backHref: string;
@@ -18,7 +19,12 @@ export default function AppHeader({ backHref, backLabel, right, showHome = true 
       </Link>
       <div className="flex shrink-0 items-center gap-1">
         {right}
-        {showHome && <HomeButton />}
+        {showHome && (
+          <>
+            <CalendarButton />
+            <HomeButton />
+          </>
+        )}
       </div>
     </header>
   );

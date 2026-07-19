@@ -16,6 +16,7 @@ export interface UserTask {
   recurrenceMonths: number;
   anchorDate: string; // YYYY-MM-DD
   active: boolean;
+  notify: boolean;
 }
 
 export interface MaintenanceLog {
@@ -76,7 +77,7 @@ export async function loadUserTasks(): Promise<UserTask[]> {
     const { data, error } = await supabase
       .from("user_maintenance_tasks")
       .select(
-        "id, task_id, custom_name, custom_description, recurrence_months, anchor_date, active, maintenance_tasks(name, description)"
+        "id, task_id, custom_name, custom_description, recurrence_months, anchor_date, active, notify, maintenance_tasks(name, description)"
       );
     if (error) throw error;
     return (data ?? []).map((row) => {
@@ -89,6 +90,7 @@ export async function loadUserTasks(): Promise<UserTask[]> {
         recurrenceMonths: row.recurrence_months,
         anchorDate: row.anchor_date,
         active: row.active,
+        notify: row.notify ?? false,
       };
     });
   } catch (err) {
@@ -124,6 +126,7 @@ export interface UserTaskSelection {
   customDescription?: string;
   recurrenceMonths: number;
   anchorDate: string;
+  notify?: boolean;
 }
 
 export async function addUserTasks(selections: UserTaskSelection[]): Promise<void> {
@@ -137,6 +140,7 @@ export async function addUserTasks(selections: UserTaskSelection[]): Promise<voi
     custom_description: s.customDescription ?? null,
     recurrence_months: s.recurrenceMonths,
     anchor_date: s.anchorDate,
+    notify: s.notify ?? false,
   }));
 
   try {
@@ -149,12 +153,13 @@ export async function addUserTasks(selections: UserTaskSelection[]): Promise<voi
 
 export async function updateUserTask(
   id: string,
-  partial: { recurrenceMonths?: number; active?: boolean; customName?: string }
+  partial: { recurrenceMonths?: number; active?: boolean; customName?: string; notify?: boolean }
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   if (partial.recurrenceMonths !== undefined) payload.recurrence_months = partial.recurrenceMonths;
   if (partial.active !== undefined) payload.active = partial.active;
   if (partial.customName !== undefined) payload.custom_name = partial.customName;
+  if (partial.notify !== undefined) payload.notify = partial.notify;
   if (Object.keys(payload).length === 0) return;
 
   try {

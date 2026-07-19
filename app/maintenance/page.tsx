@@ -5,7 +5,9 @@ import AppHeader from "@/app/components/AppHeader";
 import MonthGrid from "@/app/maintenance/components/MonthGrid";
 import DayDetailSheet from "@/app/maintenance/components/DayDetailSheet";
 import TaskManageList from "@/app/maintenance/components/TaskManageList";
+import SuggestionPicker from "@/app/maintenance/components/SuggestionPicker";
 import { PlusIcon, TrashIcon } from "@/app/components/icons";
+import NotifyToggle from "@/app/components/NotifyToggle";
 import {
   loadMasterTasks,
   loadUserTasks,
@@ -26,6 +28,7 @@ const RECURRENCE_OPTIONS = [1, 3, 6, 12, 24];
 interface Selection {
   recurrenceMonths: number;
   lastDone: string; // blank = start today
+  notify: boolean;
 }
 
 export default function MaintenancePage() {
@@ -37,13 +40,15 @@ export default function MaintenancePage() {
 
   const [selections, setSelections] = useState<Record<string, Selection>>({});
   const [customName, setCustomName] = useState("");
-  const [customTasks, setCustomTasks] = useState<Array<{ name: string; recurrenceMonths: number }>>([]);
+  const [customNotify, setCustomNotify] = useState(false);
+  const [customTasks, setCustomTasks] = useState<Array<{ name: string; recurrenceMonths: number; notify: boolean }>>([]);
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showManage, setShowManage] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   async function refetch() {
     const [master, tasks, allLogs] = await Promise.all([loadMasterTasks(), loadUserTasks(), loadAllLogs()]);
@@ -65,6 +70,11 @@ export default function MaintenancePage() {
     [userTasks, logs, selectedDate]
   );
 
+  const existingTaskIds = useMemo(
+    () => new Set(userTasks.filter((t) => t.taskId).map((t) => t.taskId!)),
+    [userTasks]
+  );
+
   const grouped = useMemo(() => {
     const groups: Record<string, MasterTask[]> = {};
     for (const task of masterTasks) {
@@ -78,7 +88,7 @@ export default function MaintenancePage() {
     setSelections((prev) => {
       const next = { ...prev };
       if (next[task.id]) delete next[task.id];
-      else next[task.id] = { recurrenceMonths: task.defaultRecurrenceMonths, lastDone: "" };
+      else next[task.id] = { recurrenceMonths: task.defaultRecurrenceMonths, lastDone: "", notify: false };
       return next;
     });
   }
@@ -89,8 +99,9 @@ export default function MaintenancePage() {
 
   function addCustomTaskDraft() {
     if (!customName.trim()) return;
-    setCustomTasks((prev) => [...prev, { name: customName.trim(), recurrenceMonths: 12 }]);
+    setCustomTasks((prev) => [...prev, { name: customName.trim(), recurrenceMonths: 12, notify: customNotify }]);
     setCustomName("");
+    setCustomNotify(false);
   }
 
   async function handleSaveSetup() {
@@ -98,11 +109,13 @@ export default function MaintenancePage() {
       taskId,
       recurrenceMonths: sel.recurrenceMonths,
       anchorDate: sel.lastDone || todayLocal(),
+      notify: sel.notify,
     }));
     const customEntries: UserTaskSelection[] = customTasks.map((c) => ({
       customName: c.name,
       recurrenceMonths: c.recurrenceMonths,
       anchorDate: todayLocal(),
+      notify: c.notify,
     }));
     const all = [...selectionEntries, ...customEntries];
     if (!all.length) return;
@@ -169,23 +182,31 @@ export default function MaintenancePage() {
                     </button>
 
                     {isSelected && (
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2 pl-[30px]">
-                        <select
-                          value={sel.recurrenceMonths}
-                          onChange={(e) => updateSelection(task.id, { recurrenceMonths: Number(e.target.value) })}
-                          className="rounded-[6px] border border-porch-border-input bg-porch-surface px-2 py-1 text-[12px] text-porch-text"
-                        >
-                          {RECURRENCE_OPTIONS.map((m) => (
-                            <option key={m} value={m}>Every {m} mo</option>
-                          ))}
-                        </select>
-                        <input
-                          type="date"
-                          value={sel.lastDone}
-                          onChange={(e) => updateSelection(task.id, { lastDone: e.target.value })}
-                          className="rounded-[6px] border border-porch-border-input bg-porch-surface px-2 py-1 text-[12px] text-porch-text"
-                        />
-                        <span className="text-[11px] text-porch-text-tertiary">last done (blank = today)</span>
+                      <div className="mt-2.5 pl-[30px]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={sel.recurrenceMonths}
+                            onChange={(e) => updateSelection(task.id, { recurrenceMonths: Number(e.target.value) })}
+                            className="rounded-[6px] border border-porch-border-input bg-porch-surface px-2 py-1 text-[12px] text-porch-text"
+                          >
+                            {RECURRENCE_OPTIONS.map((m) => (
+                              <option key={m} value={m}>Every {m} mo</option>
+                            ))}
+                          </select>
+                          <input
+                            type="date"
+                            value={sel.lastDone}
+                            onChange={(e) => updateSelection(task.id, { lastDone: e.target.value })}
+                            className="rounded-[6px] border border-porch-border-input bg-porch-surface px-2 py-1 text-[12px] text-porch-text"
+                          />
+                          <span className="text-[11px] text-porch-text-tertiary">last done (blank = today)</span>
+                        </div>
+                        <div className="mt-2.5">
+                          <NotifyToggle
+                            checked={sel.notify}
+                            onChange={(notify) => updateSelection(task.id, { notify })}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -222,6 +243,7 @@ export default function MaintenancePage() {
                 <PlusIcon color="#FFFFFF" />
               </button>
             </div>
+            <NotifyToggle checked={customNotify} onChange={setCustomNotify} showNote />
           </div>
 
           <div className="px-5 pt-6">
@@ -268,7 +290,21 @@ export default function MaintenancePage() {
       )}
 
       {showManage && (
-        <TaskManageList userTasks={userTasks} onClose={() => setShowManage(false)} onChange={refetch} />
+        <TaskManageList
+          userTasks={userTasks}
+          onClose={() => setShowManage(false)}
+          onChange={refetch}
+          onRevisitSuggestions={() => { setShowManage(false); setShowSuggestions(true); }}
+        />
+      )}
+
+      {showSuggestions && (
+        <SuggestionPicker
+          masterTasks={masterTasks}
+          existingTaskIds={existingTaskIds}
+          onClose={() => setShowSuggestions(false)}
+          onSaved={refetch}
+        />
       )}
     </div>
   );

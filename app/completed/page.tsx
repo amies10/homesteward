@@ -13,6 +13,7 @@ import { loadLatestReport, loadCompletions } from "@/lib/data";
 import Modal from "@/app/components/Modal";
 import { ChevronLeftIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 
 const TYPE_LABEL: Record<Issue["severity"], string> = {
   safety: "Safety",
@@ -140,6 +141,7 @@ export default function CompletedPage() {
           <span className="h-4 w-px bg-porch-border" />
           <span className="truncate text-[15px] font-semibold text-porch-text">Completed Fixes</span>
         </div>
+        <CalendarButton size={18} />
         <HomeButton size={18} />
       </header>
 

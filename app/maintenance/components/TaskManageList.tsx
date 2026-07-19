@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Modal from "@/app/components/Modal";
 import { PlusIcon } from "@/app/components/icons";
+import NotifyToggle from "@/app/components/NotifyToggle";
 import { updateUserTask, deactivateUserTask, reactivateUserTask, addUserTasks, todayLocal, type UserTask } from "@/lib/maintenance";
 
 const RECURRENCE_OPTIONS = [1, 3, 6, 12, 24];
@@ -11,11 +12,13 @@ interface Props {
   userTasks: UserTask[];
   onClose: () => void;
   onChange: () => void;
+  onRevisitSuggestions: () => void;
 }
 
-export default function TaskManageList({ userTasks, onClose, onChange }: Props) {
+export default function TaskManageList({ userTasks, onClose, onChange, onRevisitSuggestions }: Props) {
   const [customName, setCustomName] = useState("");
   const [customRecurrence, setCustomRecurrence] = useState(12);
+  const [customNotify, setCustomNotify] = useState(false);
   const [addingCustom, setAddingCustom] = useState(false);
 
   async function handleRecurrenceChange(id: string, months: number) {
@@ -29,20 +32,34 @@ export default function TaskManageList({ userTasks, onClose, onChange }: Props) 
     onChange();
   }
 
+  async function handleToggleNotify(task: UserTask) {
+    await updateUserTask(task.id, { notify: !task.notify });
+    onChange();
+  }
+
   async function handleAddCustom() {
     if (!customName.trim()) return;
     setAddingCustom(true);
     await addUserTasks([
-      { customName: customName.trim(), recurrenceMonths: customRecurrence, anchorDate: todayLocal() },
+      { customName: customName.trim(), recurrenceMonths: customRecurrence, anchorDate: todayLocal(), notify: customNotify },
     ]);
     setCustomName("");
+    setCustomNotify(false);
     setAddingCustom(false);
     onChange();
   }
 
   return (
     <Modal onClose={onClose} maxWidth={420} maxHeight="80vh">
-      <div className="mb-4 font-display text-lg font-semibold text-porch-text">Manage Tasks</div>
+      <div className="mb-4 flex items-center justify-between">
+        <span className="font-display text-lg font-semibold text-porch-text">Manage Tasks</span>
+        <button
+          onClick={onRevisitSuggestions}
+          className="text-[12.5px] font-semibold text-porch-accent"
+        >
+          Revisit Suggestions
+        </button>
+      </div>
 
       <div className="space-y-2.5">
         {userTasks.map((task) => (
@@ -71,6 +88,9 @@ export default function TaskManageList({ userTasks, onClose, onChange }: Props) 
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="mt-2.5">
+              <NotifyToggle checked={task.notify} onChange={() => handleToggleNotify(task)} />
             </div>
           </div>
         ))}
@@ -105,6 +125,9 @@ export default function TaskManageList({ userTasks, onClose, onChange }: Props) 
           >
             <PlusIcon color="#FFFFFF" />
           </button>
+        </div>
+        <div className="mt-2.5">
+          <NotifyToggle checked={customNotify} onChange={setCustomNotify} showNote />
         </div>
       </div>
     </Modal>

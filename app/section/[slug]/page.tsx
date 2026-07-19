@@ -27,6 +27,7 @@ import Modal from "@/app/components/Modal";
 import ChatFAB from "@/app/components/ChatFAB";
 import { ChevronLeftIcon, PencilIcon, PlusIcon, SettingsIcon, TrashIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
+import CalendarButton from "@/app/components/CalendarButton";
 
 const TYPE_LABEL: Record<Issue["severity"], string> = {
   safety: "Safety",
@@ -233,6 +234,7 @@ export default function SectionPage({
           Dashboard
         </Link>
         <div className="flex items-center gap-1">
+          <CalendarButton />
           <HomeButton />
           <Link href="/settings" aria-label="Settings" className="flex items-center justify-center p-1.5">
             <SettingsIcon />
