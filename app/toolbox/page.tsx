@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import AppHeader from "@/app/components/AppHeader";
+import { PageSkeleton } from "@/app/components/Skeleton";
 import { PlusIcon, SearchIcon, TrashIcon, XIcon } from "@/app/components/icons";
 import { loadToolbox, addTools, removeTool, type ToolboxItem } from "@/lib/toolbox";
+import { loadReports, loadAllIssueDetailsForUser } from "@/lib/data";
+import { mergeReports } from "@/lib/sections";
+import { findReadyFixes, type OpenIssueRef } from "@/lib/toolbox-match";
 
 export default function ToolboxPage() {
   const [tools, setTools] = useState<ToolboxItem[]>([]);
@@ -11,11 +16,21 @@ export default function ToolboxPage() {
   const [newTool, setNewTool] = useState("");
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState("");
+  const [readyFixes, setReadyFixes] = useState<Array<{ ref: OpenIssueRef; missingCount: number }>>([]);
+
+  async function loadReadyFixes(currentTools: ToolboxItem[]) {
+    const [reports, detailsRows] = await Promise.all([loadReports(), loadAllIssueDetailsForUser()]);
+    const openRefs: OpenIssueRef[] = mergeReports(reports).flatMap((section) =>
+      section.issues.filter((ref) => !ref.issue.deleted).map((ref) => ({ ...ref, slug: section.slug }))
+    );
+    setReadyFixes(findReadyFixes(currentTools.map((t) => t.toolName), detailsRows, openRefs));
+  }
 
   useEffect(() => {
     loadToolbox().then((data) => {
       setTools(data);
       setLoaded(true);
+      loadReadyFixes(data);
     });
   }, []);
 
@@ -24,14 +39,18 @@ export default function ToolboxPage() {
     if (!name) return;
     setAdding(true);
     await addTools([name], "manual");
-    setTools(await loadToolbox());
+    const updated = await loadToolbox();
+    setTools(updated);
     setNewTool("");
     setAdding(false);
+    loadReadyFixes(updated);
   }
 
   async function handleRemove(id: string) {
-    setTools((prev) => prev.filter((t) => t.id !== id));
+    const updated = tools.filter((t) => t.id !== id);
+    setTools(updated);
     await removeTool(id);
+    loadReadyFixes(updated);
   }
 
   const query = search.trim().toLowerCase();
@@ -48,7 +67,9 @@ export default function ToolboxPage() {
         </p>
       </div>
 
-      {loaded && (
+      {!loaded ? (
+        <PageSkeleton />
+      ) : (
         <>
           {tools.length > 0 && (
             <div className="mx-5 mt-4">
@@ -105,7 +126,7 @@ export default function ToolboxPage() {
               onChange={(e) => setNewTool(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               placeholder="Add a tool (e.g. Cordless drill)"
-              className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
             />
             <button
               onClick={handleAdd}
@@ -116,6 +137,25 @@ export default function ToolboxPage() {
               <PlusIcon color="#FFFFFF" />
             </button>
           </div>
+
+          {readyFixes.length > 0 && (
+            <div className="mx-5 mt-5 rounded-2xl border border-porch-success-border bg-porch-success-bg p-[18px]">
+              <p className="text-[13.5px] font-semibold text-porch-success">
+                You already own everything needed for {readyFixes.length} fix{readyFixes.length !== 1 ? "es" : ""}
+              </p>
+              <div className="mt-2.5 space-y-1.5">
+                {readyFixes.map(({ ref }) => (
+                  <Link
+                    key={`${ref.reportId}-${ref.slug}-${ref.issueIndex}`}
+                    href={`/section/${ref.slug}/issue/${ref.issueIndex}?r=${ref.reportId}`}
+                    className="block text-[13.5px] font-medium text-porch-success underline underline-offset-2"
+                  >
+                    {ref.issue.title}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

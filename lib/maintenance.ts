@@ -1,4 +1,5 @@
 import { supabase } from "./supabase-client";
+import type { Issue, PropertyDetails } from "./sections";
 
 export interface MasterTask {
   id: string;
@@ -48,6 +49,12 @@ export function addMonthsLocal(dateStr: string, months: number): string {
   const daysInTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
   const day = Math.min(d, daysInTarget);
   return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export function addDaysLocal(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = new Date(y, m - 1, d + days);
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────
@@ -279,4 +286,67 @@ export function computeEntriesForDate(tasks: UserTask[], logs: MaintenanceLog[],
   }
 
   return entries;
+}
+
+// ── G1: property-aware task suggestions ─────────────────────────────────
+// Task names below are matched verbatim against the seed data in
+// supabase/migrations/013_maintenance.sql — every name referenced here exists
+// in that seed list exactly as written.
+export function suggestedTaskNames(property: PropertyDetails | null, mergedIssues: Issue[]): Set<string> {
+  const names = new Set<string>();
+
+  if (property?.hvacType) {
+    if (/forced.?air|furnace/i.test(property.hvacType)) {
+      names.add("Replace HVAC filter");
+    }
+    names.add("Service HVAC system");
+  }
+
+  if (property?.roofType) {
+    names.add("Inspect roof from ground");
+    names.add("Clean gutters & downspouts");
+  }
+
+  if (property?.foundationType && /basement|crawl/i.test(property.foundationType)) {
+    names.add("Check sump pump");
+    names.add("Inspect foundation & grading");
+  }
+
+  const specStrings = [
+    ...((property?.otherSpecs ?? []).map((s) => s.value)),
+    ...mergedIssues.flatMap((i) => i.equipmentSpecs ?? []),
+  ];
+  if (specStrings.some((s) => /water softener/i.test(s))) {
+    names.add("Check water softener salt");
+  }
+  if (specStrings.some((s) => /water heater/i.test(s))) {
+    names.add("Flush water heater");
+  }
+
+  names.add("Test smoke & CO detectors");
+  names.add("Test GFCI outlets");
+
+  return names;
+}
+
+// ── G2: agenda view ──────────────────────────────────────────────────────
+export function upcomingEntries(
+  tasks: UserTask[],
+  logs: MaintenanceLog[],
+  days = 90
+): Array<{ date: string; task: UserTask; overdue: boolean }> {
+  const today = todayLocal();
+  const horizon = addDaysLocal(today, days);
+  const entries: Array<{ date: string; task: UserTask; overdue: boolean }> = [];
+
+  for (const task of tasks.filter((t) => t.active)) {
+    const due = nextDueDate(task, logs);
+    if (due < today) {
+      entries.push({ date: due, task, overdue: true });
+    } else if (due <= horizon) {
+      entries.push({ date: due, task, overdue: false });
+    }
+  }
+
+  return entries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }

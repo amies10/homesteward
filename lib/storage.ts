@@ -56,6 +56,20 @@ export async function uploadAvatar(userId: string, file: File | Blob): Promise<s
   }
 }
 
+export async function uploadUserDocument(userId: string, file: File): Promise<string | null> {
+  const path = `documents/${userId}/${crypto.randomUUID()}-${file.name}`;
+  try {
+    const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+      contentType: file.type,
+    });
+    if (error) throw error;
+    return path;
+  } catch (err) {
+    console.warn("[storage] uploadUserDocument failed", err);
+    return null;
+  }
+}
+
 export async function getSignedUrl(
   path: string,
   expiresIn = 3600,

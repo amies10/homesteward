@@ -85,6 +85,7 @@ interface PlacesPlace {
   rating?: number;
   userRatingCount?: number;
   googleMapsUri?: string;
+  websiteUri?: string;
 }
 
 interface PlacesResponse {
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
           "places.rating",
           "places.userRatingCount",
           "places.googleMapsUri",
+          "places.websiteUri",
         ].join(","),
       },
       body: JSON.stringify({
@@ -158,6 +160,7 @@ export async function POST(request: NextRequest) {
         name: p.displayName?.text ?? "Unknown",
         address: p.formattedAddress ?? "",
         phone: p.nationalPhoneNumber,
+        website: p.websiteUri,
         rating: p.rating,
         reviewCount: p.userRatingCount,
         mapsUrl: p.googleMapsUri ?? `https://maps.google.com/maps?q=${encodeURIComponent((p.displayName?.text ?? "") + " " + (p.formattedAddress ?? ""))}`,

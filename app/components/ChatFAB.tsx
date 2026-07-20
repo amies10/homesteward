@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { StoredChatMessage } from "@/lib/sections";
+import { streamChat } from "@/lib/chat-stream";
 import AssistantAvatar from "./AssistantAvatar";
 import BottomSheet from "./BottomSheet";
 import MicButton from "./MicButton";
@@ -15,9 +16,10 @@ interface Props {
   placeholder: string;
   emptyStateText: string;
   context: Record<string, unknown>;
+  suggestedPrompts?: string[];
 }
 
-export default function ChatFAB({ scope, storageKey, title, placeholder, emptyStateText, context }: Props) {
+export default function ChatFAB({ scope, storageKey, title, placeholder, emptyStateText, context, suggestedPrompts }: Props) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<StoredChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
@@ -31,6 +33,7 @@ export default function ChatFAB({ scope, storageKey, title, placeholder, emptySt
   useEffect(() => {
     try {
       const stored = localStorage.getItem(key);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating from localStorage, keyed on storageKey
       if (stored) setMessages(JSON.parse(stored));
     } catch {}
   }, [key]);
@@ -51,46 +54,45 @@ export default function ChatFAB({ scope, storageKey, title, placeholder, emptySt
     e.target.value = "";
   }
 
-  async function sendMessage() {
-    if (!inputText.trim() && !pendingImage) return;
+  async function sendMessage(textOverride?: string) {
+    const text = (textOverride ?? inputText).trim();
+    if (!text && !pendingImage) return;
 
     const userMsg: StoredChatMessage = {
       role: "user",
-      text: inputText.trim(),
+      text,
       imageBase64: pendingImage?.base64,
       imageMimeType: pendingImage?.mimeType,
       timestamp: new Date().toISOString(),
     };
-    const updated = [...messages, userMsg];
-    setMessages(updated);
-    localStorage.setItem(key, JSON.stringify(updated));
+    const withUser = [...messages, userMsg];
+    setMessages(withUser);
+    localStorage.setItem(key, JSON.stringify(withUser));
     setInputText("");
     setPendingImage(null);
     setLoading(true);
     setError(null);
 
+    const placeholder: StoredChatMessage = { role: "assistant", text: "", timestamp: new Date().toISOString() };
+    setMessages([...withUser, placeholder]);
+
     try {
-      const res = await fetch("/api/assistant-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updated, scope, context }),
+      const finalText = await streamChat("/api/assistant-chat", { messages: withUser, scope, context }, (accumulated) => {
+        setMessages((prev) => prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: accumulated } : m)));
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Request failed");
-      const assistantMsg: StoredChatMessage = {
-        role: "assistant",
-        text: data.text,
-        timestamp: new Date().toISOString(),
-      };
-      const withReply = [...updated, assistantMsg];
-      setMessages(withReply);
-      localStorage.setItem(key, JSON.stringify(withReply));
+      const finalMessages = [...withUser, { ...placeholder, text: finalText }];
+      setMessages(finalMessages);
+      localStorage.setItem(key, JSON.stringify(finalMessages));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to get response");
+      setMessages(withUser);
     } finally {
       setLoading(false);
     }
   }
+
+  const lastMessage = messages[messages.length - 1];
+  const lastAssistantText = lastMessage?.role === "assistant" ? lastMessage.text : "";
 
   return (
     <>
@@ -154,7 +156,7 @@ export default function ChatFAB({ scope, storageKey, title, placeholder, emptySt
                   <CameraIcon />
                 </button>
                 <button
-                  onClick={sendMessage}
+                  onClick={() => sendMessage()}
                   disabled={loading || (!inputText.trim() && !pendingImage)}
                   aria-label="Send"
                   className="btn-press flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border-none bg-porch-accent disabled:opacity-50"
@@ -166,33 +168,51 @@ export default function ChatFAB({ scope, storageKey, title, placeholder, emptySt
           }
         >
           {messages.length === 0 && !loading && (
-            <p className="pt-5 text-center text-[13.5px] text-porch-text-faint">{emptyStateText}</p>
+            <div className="pt-5 text-center">
+              <p className="text-[13.5px] text-porch-text-faint">{emptyStateText}</p>
+              {!!suggestedPrompts?.length && (
+                <div className="mt-3.5 flex flex-wrap justify-center gap-2 px-2">
+                  {suggestedPrompts.slice(0, 4).map((prompt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => sendMessage(prompt)}
+                      className="btn-press rounded-full border border-porch-accent/40 bg-porch-accent-tint px-3.5 py-2.5 text-[13px] text-porch-accent"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <div className="space-y-3">
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                    msg.role === "user"
-                      ? "bg-porch-surface border border-porch-border text-porch-text"
-                      : "bg-porch-accent-tint border border-[#ECE0E6] text-porch-text"
-                  }`}
-                >
-                  {msg.imageBase64 && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`}
-                      alt="Uploaded"
-                      className="mb-2 max-h-48 rounded-lg object-contain"
-                    />
-                  )}
-                  {msg.text && (
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
-                  )}
+            {messages.map((msg, i) => {
+              if (!msg.text && !msg.imageBase64) return null;
+              return (
+                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                      msg.role === "user"
+                        ? "bg-porch-surface border border-porch-border text-porch-text"
+                        : "bg-porch-accent-tint border border-[#ECE0E6] text-porch-text"
+                    }`}
+                  >
+                    {msg.imageBase64 && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`}
+                        alt="Uploaded"
+                        className="mb-2 max-h-48 rounded-lg object-contain"
+                      />
+                    )}
+                    {msg.text && (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {loading && (
+              );
+            })}
+            {loading && lastAssistantText === "" && (
               <div className="flex justify-start">
                 <div className="rounded-2xl border border-porch-border bg-porch-surface px-4 py-2.5">
                   <p className="text-sm text-porch-text-tertiary">Thinking…</p>

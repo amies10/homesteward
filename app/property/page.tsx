@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from "react";
 import AppHeader from "@/app/components/AppHeader";
+import { PageSkeleton } from "@/app/components/Skeleton";
 import { CheckIcon, PlusIcon, TrashIcon } from "@/app/components/icons";
+import AgingCallout from "@/app/components/AgingCallout";
 import { loadPropertyDetails, savePropertyDetails } from "@/lib/property";
-import type { PropertyDetails } from "@/lib/sections";
+import { loadReports } from "@/lib/data";
+import { mergeReports, type PropertyDetails } from "@/lib/sections";
+import { computeAgingInsights, type AgingInsight } from "@/lib/insights";
 
 const EMPTY: PropertyDetails = {
   yearBuilt: null,
@@ -31,11 +35,19 @@ export default function PropertyDetailsPage() {
   const [saved, setSaved] = useState(false);
   const [newSpecLabel, setNewSpecLabel] = useState("");
   const [newSpecValue, setNewSpecValue] = useState("");
+  const [agingInsights, setAgingInsights] = useState<AgingInsight[]>([]);
 
   useEffect(() => {
     loadPropertyDetails().then((data) => {
       if (data) setDetails({ ...EMPTY, ...data });
       setLoaded(true);
+
+      loadReports().then((reports) => {
+        const allIssues = mergeReports(reports).flatMap((s) =>
+          s.issues.filter((ref) => !ref.issue.deleted).map((ref) => ref.issue)
+        );
+        setAgingInsights(computeAgingInsights(data, allIssues));
+      });
     });
   }, []);
 
@@ -74,6 +86,12 @@ export default function PropertyDetailsPage() {
     <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <AppHeader backHref="/profile" backLabel="Profile" />
 
+      {agingInsights.length > 0 && (
+        <div className="px-5 pt-4">
+          <AgingCallout insights={agingInsights} />
+        </div>
+      )}
+
       <div className="px-5 pb-1 pt-5">
         <span className="font-display text-[22px] font-semibold text-porch-text">Property Details</span>
         <p className="mt-1 text-[13.5px] text-porch-text-secondary">
@@ -81,7 +99,9 @@ export default function PropertyDetailsPage() {
         </p>
       </div>
 
-      {loaded && (
+      {!loaded ? (
+        <PageSkeleton />
+      ) : (
         <>
           <div className="mx-5 mt-4 space-y-3.5 rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
             <div className="grid grid-cols-2 gap-3">

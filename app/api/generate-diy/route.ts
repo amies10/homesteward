@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 const client = new Anthropic();
 
 export async function POST(request: NextRequest) {
@@ -20,6 +22,8 @@ export async function POST(request: NextRequest) {
       skillLevel,
       ownedTools,
       photoUrls,
+      location,
+      propertyContext,
     } = body as {
       issueTitle: string;
       issueDescription: string;
@@ -34,6 +38,9 @@ export async function POST(request: NextRequest) {
       skillLevel?: string;
       ownedTools?: string[];
       photoUrls?: string[];
+      location?: string;
+      propertyContext?: string;
+      sectionSlug?: string;
     };
 
     if (!issueTitle || !issueDescription) {
@@ -61,13 +68,13 @@ ${existingStepByStepPlan!.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 The homeowner has this feedback:
 "${feedback}"${ownedTools?.length ? `\n\nThe homeowner already owns: ${ownedTools.join(", ")}. Don't list owned tools in materialsList.` : ""}
 
-Revise the plan to address their feedback. Return the complete updated plan — include all items and steps, not just the changes. Use the same JSON structure. Keep marking each materialsList entry with "isTool".`
+Revise the plan to address their feedback. Return the complete updated plan — include all items and steps, not just the changes. Use the same JSON structure. Keep marking each materialsList entry with "isTool", and set safetyWarning following the same rule as before.`
       : `Generate a detailed DIY repair plan for the following home inspection issue.
 
 Issue: ${issueTitle}
 Description: ${issueDescription}
 Severity: ${severity}
-Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nEquipment typically needed: ${equipmentSpecs.join(", ")}` : ""}${costEstimateDIY ? `\nEstimated DIY cost: ${costEstimateDIY}` : ""}${observationLine}${skillLevel ? `\nThe homeowner's effective skill level is ${skillLevel}. Calibrate step granularity and tool assumptions to that level.` : ""}${ownedTools?.length ? `\nThe homeowner already owns: ${ownedTools.join(", ")}. Do not include owned tools in materialsList; where a step uses one, just name it.` : ""}
+Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nEquipment typically needed: ${equipmentSpecs.join(", ")}` : ""}${costEstimateDIY ? `\nEstimated DIY cost: ${costEstimateDIY}` : ""}${observationLine}${skillLevel ? `\nThe homeowner's effective skill level is ${skillLevel}. Calibrate step granularity and tool assumptions to that level.` : ""}${ownedTools?.length ? `\nThe homeowner already owns: ${ownedTools.join(", ")}. Do not include owned tools in materialsList; where a step uses one, just name it.` : ""}${location ? `\nThe home is located near: ${location}. Use local big-box retail prices for the materials list.` : ""}${propertyContext ? `\nWhat we know about this home:\n${propertyContext}\nAccount for the home's age and systems where relevant.` : ""}
 
 For materialsList: list every tool, material, and consumable a homeowner needs to complete this repair. Include estimated individual costs using en-dash (–) between low and high values. Mark each entry "isTool": true if it's a reusable tool (drill, wrench, ladder, etc.) or "isTool": false if it's a consumable material (screws, caulk, paint, etc.).
 
@@ -82,7 +89,7 @@ For stepByStepPlan: provide clear, safe, numbered steps a homeowner can follow. 
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
       system:
-        "You are an expert home repair advisor. Generate detailed, accurate DIY repair plans for homeowners. Return only valid JSON with no surrounding text or markdown.",
+        "You are an expert home repair advisor. Generate detailed, accurate DIY repair plans for homeowners. Return only valid JSON with no surrounding text or markdown.\n\nWhen a repair involves electrical, gas, or structural work, treat safety as the first concern. Set \"safetyWarning\" to one or two plain sentences that name the specific hazard (shock, gas leak, structural collapse) and tell the homeowner to stop and call a professional if anything looks different from the instructions. Build concrete safety checks into the steps themselves: verify power is off at the breaker and confirm dead with a non-contact voltage tester before touching wiring; shut the gas supply and test for leaks with soapy water; never remove load-bearing material without temporary support. Write those steps in a direct, factual tone. For repairs without these risks, set \"safetyWarning\" to null.",
       messages: [
         {
           role: "user",
@@ -94,6 +101,7 @@ For stepByStepPlan: provide clear, safe, numbered steps a homeowner can follow. 
 
 Return a JSON object in this exact structure:
 {
+  "safetyWarning": null,
   "materialsList": [
     { "item": "Tool or material name", "estimatedCost": "$10–$30", "isTool": false }
   ],

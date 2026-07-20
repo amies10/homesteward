@@ -6,35 +6,50 @@ import Link from "next/link";
 import MarkdownProse from "@/app/components/MarkdownProse";
 import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
+import { PageSkeleton } from "@/app/components/Skeleton";
+import { useProgressiveStatus } from "@/app/components/useProgressiveStatus";
+import EstimateDisclaimer from "@/app/components/EstimateDisclaimer";
 import ChatFAB from "@/app/components/ChatFAB";
-import { ChevronDownIcon, ChevronLeftIcon, SettingsIcon } from "@/app/components/icons";
+import LevelUpModal from "@/app/components/LevelUpModal";
+import ContractorContactModal from "@/app/components/ContractorContactModal";
+import ShareFixCard from "@/app/components/ShareFixCard";
+import { ChevronDownIcon, ChevronLeftIcon, SettingsIcon, ShareIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
 import CalendarButton from "@/app/components/CalendarButton";
+import { shareText } from "@/lib/share";
 import {
   sections,
   normalize,
+  mergeReports,
+  issueKey,
+  savingsFor,
   SKILL_RANK,
   contractorsKey,
-  type ParsedReport,
+  type StoredReport,
   type Issue,
   type IssueDetails,
   type CompletionRecord,
   type UserProfile,
   type ContractorResult,
+  type SkillLevel,
 } from "@/lib/sections";
 import {
-  loadLatestReport,
+  loadReports,
   loadCompletions,
   loadUserProfile,
   loadAllMyCompletions,
   loadIssueDetails,
   saveIssueDetails,
   saveCompletion,
-  updateReport,
-  getCurrentReportId,
+  removeCompletion,
+  updateCompletionContractor,
+  updateReportSections,
+  moveIssueDetails,
 } from "@/lib/data";
 import { computeEffectiveSkill } from "@/lib/skill";
 import { loadToolbox, addTools, isToolHeuristic } from "@/lib/toolbox";
+import { loadPropertyDetails } from "@/lib/property";
+import { propertyContextLines } from "@/lib/ai-context";
 import ToolSuggestSheet from "@/app/components/ToolSuggestSheet";
 import PhotoGallery from "@/app/components/PhotoGallery";
 import { uploadIssuePhoto, removePaths, signPaths } from "@/lib/storage";
@@ -53,21 +68,25 @@ export default function IssuePage({
   searchParams,
 }: {
   params: Promise<{ slug: string; issueIndex: string }>;
-  searchParams: Promise<{ from?: string }>;
+  searchParams: Promise<{ from?: string; r?: string }>;
 }) {
   const router = useRouter();
   const { slug, issueIndex } = use(params);
-  const { from } = use(searchParams);
+  const { from, r } = use(searchParams);
   const index = parseInt(issueIndex, 10);
   const sectionConfig = sections.find((s) => s.slug === slug);
 
-  const [report, setReport] = useState<ParsedReport | null>(null);
+  const [reports, setReports] = useState<StoredReport[]>([]);
+  const [reportId, setReportId] = useState<string | null>(null);
   const [userSkillLevel, setUserSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
+  const [userAccountType, setUserAccountType] = useState<UserProfile["accountType"] | null>(null);
   const [effectiveSkillLevel, setEffectiveSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [userLocation, setUserLocation] = useState<string | null>(null);
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [contractors, setContractors] = useState<ContractorResult[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [myCompletions, setMyCompletions] = useState<CompletionRecord[]>([]);
+  const [showLevelUp, setShowLevelUp] = useState<SkillLevel | null>(null);
 
   const [diyUnlocked, setDiyUnlocked] = useState(false);
   const [generatingDiy, setGeneratingDiy] = useState(false);
@@ -75,7 +94,7 @@ export default function IssuePage({
   const [generatingExpert, setGeneratingExpert] = useState(false);
   const [expertError, setExpertError] = useState<string | null>(null);
   const [contractorType, setContractorType] = useState<string | null>(null);
-  const [contacted, setContacted] = useState<Record<number, boolean>>({});
+  const [contactModalContractor, setContactModalContractor] = useState<ContractorResult | null>(null);
   const [briefingOpen, setBriefingOpen] = useState(true);
 
   const [showRefineBriefingModal, setShowRefineBriefingModal] = useState(false);
@@ -97,7 +116,11 @@ export default function IssuePage({
   const [showForm, setShowForm] = useState(false);
   const [completedBy, setCompletedBy] = useState<"me" | "professional" | null>(null);
   const [difficulty, setDifficulty] = useState<number | null>(null);
+  const [actualCost, setActualCost] = useState("");
   const [saved, setSaved] = useState(false);
+  const [completionRecord, setCompletionRecord] = useState<CompletionRecord | null>(null);
+  const [showShareFix, setShowShareFix] = useState(false);
+  const [briefingCopied, setBriefingCopied] = useState(false);
 
   const [moveTarget, setMoveTarget] = useState("");
   const [moving, setMoving] = useState(false);
@@ -105,52 +128,83 @@ export default function IssuePage({
   const [suggestedTools, setSuggestedTools] = useState<string[]>([]);
   const [ownedTools, setOwnedTools] = useState<string[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [propertyContext, setPropertyContext] = useState("");
+
+  const diyStatus = useProgressiveStatus(generatingDiy, [
+    ["Generating…", 0],
+    ["Sizing steps to your skill level…", 4000],
+    ["Pricing materials…", 9000],
+  ]);
+  const expertStatus = useProgressiveStatus(generatingExpert, [
+    ["Generating…", 0],
+    ["Writing your contractor briefing…", 4000],
+    ["Finding local pros…", 9000],
+  ]);
 
   useEffect(() => {
-    Promise.all([
-      loadLatestReport(),
-      loadCompletions(),
-      loadUserProfile(),
-      loadIssueDetails(slug, index),
-      loadAllMyCompletions(),
-    ]).then(([r, completions, profile, details, myCompletions]) => {
-      if (r) setReport(r);
-      if (completions[`${slug}-${index}`]) setSaved(true);
-      if (profile) {
-        setUserSkillLevel(profile.skillLevel);
-        if (profile.location) setUserLocation(profile.location);
-        const lookupIssue = (issueSlug: string, idx: number) => {
-          const cfg = sections.find((sc) => sc.slug === issueSlug);
-          const sec = r?.sections.find(
-            (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
-          );
-          return sec?.issues[idx];
-        };
-        setEffectiveSkillLevel(computeEffectiveSkill(profile.skillLevel, myCompletions, lookupIssue).effective);
+    loadReports().then((loadedReports) => {
+      setReports(loadedReports);
+      const resolvedReportId = r ?? loadedReports[0]?.id ?? null;
+      setReportId(resolvedReportId);
+
+      if (!resolvedReportId) {
+        setLoaded(true);
+        return;
       }
-      if (details) setIssueDetails(details);
-      setLoaded(true);
+
+      Promise.all([
+        loadCompletions(),
+        loadUserProfile(),
+        loadIssueDetails(resolvedReportId, slug, index),
+        loadAllMyCompletions(),
+      ]).then(([completions, profile, details, myCompletions]) => {
+        const existingCompletion = completions[issueKey(resolvedReportId, slug, index)];
+        if (existingCompletion) {
+          setSaved(true);
+          setCompletedBy(existingCompletion.completedBy);
+          setCompletionRecord(existingCompletion);
+        }
+        setMyCompletions(myCompletions);
+        if (profile) {
+          setUserSkillLevel(profile.skillLevel);
+          setUserAccountType(profile.accountType ?? "owner");
+          if (profile.location) setUserLocation(profile.location);
+          const lookupIssue = (repId: string, issueSlug: string, idx: number) => {
+            const rpt = loadedReports.find((rp) => rp.id === repId);
+            const cfg = sections.find((sc) => sc.slug === issueSlug);
+            const sec = rpt?.sections.find(
+              (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
+            );
+            return sec?.issues[idx];
+          };
+          setEffectiveSkillLevel(computeEffectiveSkill(profile.skillLevel, myCompletions, lookupIssue).effective);
+        }
+        if (details) setIssueDetails(details);
+        setLoaded(true);
+      });
+
+      try {
+        const stored = localStorage.getItem(contractorsKey(resolvedReportId, slug, index));
+        if (stored) {
+          const parsed = JSON.parse(stored) as { contractors: ContractorResult[]; contractorType: string };
+          setContractors(parsed.contractors ?? []);
+          setContractorType(parsed.contractorType ?? null);
+        }
+      } catch {}
     });
 
     loadToolbox().then((tools) => setOwnedTools(tools.map((t) => t.toolName)));
+    loadPropertyDetails().then((property) => setPropertyContext(propertyContextLines(property)));
+  }, [slug, index, r]);
 
-    try {
-      const stored = localStorage.getItem(contractorsKey(slug, index));
-      if (stored) {
-        const parsed = JSON.parse(stored) as { contractors: ContractorResult[]; contractorType: string };
-        setContractors(parsed.contractors ?? []);
-        setContractorType(parsed.contractorType ?? null);
-      }
-    } catch {}
-  }, [slug, index]);
-
-  const reportSection = report?.sections.find(
+  const reportForIssue = reports.find((rp) => rp.id === reportId);
+  const reportSection = reportForIssue?.sections.find(
     (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
   );
   const sectionDisplayName = reportSection?.name ?? sectionConfig?.label ?? slug;
   const issue = reportSection?.issues[index];
 
-  if (!sectionConfig && !loaded) return null;
+  if (!sectionConfig && !loaded) return <PageSkeleton />;
 
   if (loaded && !reportSection && !sectionConfig) {
     return (
@@ -168,7 +222,7 @@ export default function IssuePage({
     );
   }
 
-  if (!issue) return null;
+  if (!issue) return <PageSkeleton />;
 
   const isProOnly = !issue.costEstimateDIY;
   const hasSkillMismatch =
@@ -182,21 +236,20 @@ export default function IssuePage({
     !!issue.minimumSkillLevel &&
     SKILL_RANK[effectiveSkillLevel] >= SKILL_RANK[issue.minimumSkillLevel];
   const showDiyWarning = (isProOnly || hasSkillMismatch) && !diyUnlocked;
+  const bypassedDiyWarning = (isProOnly || hasSkillMismatch) && diyUnlocked;
 
   const hasDiyPlan = !!(issueDetails?.materialsList?.length || issueDetails?.stepByStepPlan?.length);
   const hasExpertGuide = !!issueDetails?.contractorBriefing;
 
+  const mergedSections = mergeReports(reports);
   const moveTargetOptions: Array<{ slug: string; label: string }> = [
-    ...sections
-      .filter((s) => s.slug !== slug)
-      .map((s) => ({ slug: s.slug, label: s.label })),
-    ...(report?.sections
-      .filter((s) => s.userAdded && s.slug && s.slug !== slug)
-      .map((s) => ({ slug: s.slug!, label: s.name })) ?? []),
+    ...sections.filter((s) => s.slug !== slug).map((s) => ({ slug: s.slug, label: s.label })),
+    ...mergedSections
+      .filter((s) => !sections.some((std) => std.slug === s.slug) && s.slug !== slug)
+      .map((s) => ({ slug: s.slug, label: s.name })),
   ];
 
   async function handleAddPhoto(file: File) {
-    const reportId = getCurrentReportId();
     const { data: { session } } = await supabase.auth.getSession();
     const userId = session?.user.id;
     if (!reportId || !userId) return;
@@ -209,23 +262,24 @@ export default function IssuePage({
         photoPaths: [...(issueDetails?.photoPaths ?? []), path],
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
     }
     setUploadingPhoto(false);
   }
 
   async function handleRemovePhoto(path: string) {
+    if (!reportId) return;
     const updated: IssueDetails = {
       ...issueDetails,
       photoPaths: (issueDetails?.photoPaths ?? []).filter((p) => p !== path),
     };
     setIssueDetails(updated);
-    await saveIssueDetails(slug, index, updated);
+    await saveIssueDetails(reportId, slug, index, updated);
     await removePaths([path]);
   }
 
   async function handleGenerateDiy() {
-    if (!issue) return;
+    if (!issue || !reportId) return;
     setGeneratingDiy(true);
     setDiyError(null);
     try {
@@ -245,6 +299,9 @@ export default function IssuePage({
           photoUrls: issueDetails?.photoPaths?.length
             ? Object.values(await signPaths(issueDetails.photoPaths))
             : undefined,
+          location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
+          sectionSlug: slug,
         }),
       });
       const data = await res.json();
@@ -253,9 +310,10 @@ export default function IssuePage({
         ...issueDetails,
         materialsList: data.materialsList,
         stepByStepPlan: data.stepByStepPlan,
+        safetyWarning: data.safetyWarning ?? null,
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
     } catch (err) {
       setDiyError(err instanceof Error ? err.message : "Failed to generate plan");
     } finally {
@@ -264,10 +322,14 @@ export default function IssuePage({
   }
 
   async function handleGenerateExpert() {
-    if (!issue) return;
+    if (!issue || !reportId) return;
     setGeneratingExpert(true);
     setExpertError(null);
     try {
+      const expertPhotoUrls = issueDetails?.photoPaths?.length
+        ? Object.values(await signPaths(issueDetails.photoPaths))
+        : undefined;
+
       const expertFetch = fetch("/api/generate-expert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -279,6 +341,9 @@ export default function IssuePage({
           equipmentSpecs: issue.equipmentSpecs,
           costEstimatePro: issue.costEstimatePro,
           userObservation: issueDetails?.userObservation,
+          photoUrls: expertPhotoUrls,
+          location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
         }),
       });
 
@@ -304,7 +369,7 @@ export default function IssuePage({
         contractorBriefing: expertData.contractorBriefing,
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
 
       if (contractorRes) {
         const contractorData = await contractorRes.json();
@@ -312,7 +377,7 @@ export default function IssuePage({
           setContractors(contractorData.contractors);
           setContractorType(contractorData.contractorType ?? null);
           localStorage.setItem(
-            contractorsKey(slug, index),
+            contractorsKey(reportId, slug, index),
             JSON.stringify({ contractors: contractorData.contractors, contractorType: contractorData.contractorType })
           );
         }
@@ -324,18 +389,43 @@ export default function IssuePage({
     }
   }
 
+  function lookupIssueInReports(repId: string, issueSlug: string, idx: number): Issue | undefined {
+    const rpt = reports.find((rp) => rp.id === repId);
+    const cfg = sections.find((sc) => sc.slug === issueSlug);
+    const sec = rpt?.sections.find(
+      (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
+    );
+    return sec?.issues[idx];
+  }
+
   async function handleSave() {
-    if (!completedBy) return;
+    if (!completedBy || !reportId) return;
+    const parsedCost = actualCost.trim() ? parseFloat(actualCost) : NaN;
     const record: CompletionRecord = {
       slug,
       issueIndex: index,
+      reportId,
       completedBy,
       ...(completedBy === "me" && difficulty ? { difficulty } : {}),
       completedAt: new Date().toISOString(),
+      ...(actualCost.trim() && !isNaN(parsedCost) ? { actualCost: parsedCost } : {}),
     };
+
+    const before = userSkillLevel
+      ? computeEffectiveSkill(userSkillLevel, myCompletions, lookupIssueInReports)
+      : null;
+
     await saveCompletion(record);
     setSaved(true);
+    setCompletionRecord(record);
     setShowForm(false);
+
+    if (before && userSkillLevel) {
+      const updatedCompletions = completedBy === "me" ? [...myCompletions, record] : myCompletions;
+      const after = computeEffectiveSkill(userSkillLevel, updatedCompletions, lookupIssueInReports);
+      if (completedBy === "me") setMyCompletions(updatedCompletions);
+      if (SKILL_RANK[after.effective] > SKILL_RANK[before.effective]) setShowLevelUp(after.effective);
+    }
 
     if (completedBy === "me" && issueDetails?.materialsList?.length) {
       const owned = new Set((await loadToolbox()).map((t) => t.toolName.toLowerCase()));
@@ -346,11 +436,49 @@ export default function IssuePage({
     }
   }
 
+  async function handleMarkOpen() {
+    if (!reportId) return;
+    await removeCompletion(reportId, slug, index);
+    setSaved(false);
+    setCompletedBy(null);
+    setDifficulty(null);
+    setActualCost("");
+    setCompletionRecord(null);
+  }
+
+  async function handleShareBriefing() {
+    if (!issue || !issueDetails?.contractorBriefing) return;
+    const briefingLines = issueDetails.contractorBriefing.split("\n").map((line) => {
+      const heading = line.match(/^###\s+(.*)$/);
+      return heading ? heading[1].toUpperCase() : line;
+    });
+    const text = [
+      issue.title,
+      sectionDisplayName,
+      "",
+      briefingLines.join("\n"),
+      "",
+      "— Prepared with Porchlight (homesteward-tau.vercel.app)",
+    ].join("\n");
+    try {
+      const result = await shareText("Contractor Briefing", text);
+      if (result === "copied") {
+        setBriefingCopied(true);
+        setTimeout(() => setBriefingCopied(false), 2200);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+    }
+  }
+
   async function handleRefineBriefing() {
-    if (!refineBriefingFeedback.trim() || !issue || !issueDetails?.contractorBriefing) return;
+    if (!refineBriefingFeedback.trim() || !issue || !issueDetails?.contractorBriefing || !reportId) return;
     setRefiningBriefing(true);
     setRefineBriefingError(null);
     try {
+      const photoUrls = issueDetails?.photoPaths?.length
+        ? Object.values(await signPaths(issueDetails.photoPaths))
+        : undefined;
       const res = await fetch("/api/generate-expert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -364,13 +492,16 @@ export default function IssuePage({
           feedback: refineBriefingFeedback.trim(),
           existingBriefing: issueDetails.contractorBriefing,
           userObservation: issueDetails?.userObservation,
+          photoUrls,
+          location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Refinement failed");
       const updated: IssueDetails = { ...issueDetails, contractorBriefing: data.contractorBriefing };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
       setShowRefineBriefingModal(false);
       setRefineBriefingFeedback("");
     } catch (err) {
@@ -380,8 +511,26 @@ export default function IssuePage({
     }
   }
 
+  // Shared tail for both "Polish & save" and "Save as-is" — closes the editor
+  // and, if a DIY plan and/or expert briefing already exist, chains into the
+  // regenerate-with-new-observations modal flow.
+  function afterObservationSaved() {
+    setObservationExpanded(false);
+    setObservationDraft("");
+
+    const hasPlan = !!(issueDetails?.materialsList?.length || issueDetails?.stepByStepPlan?.length);
+    const hasBriefing = !!issueDetails?.contractorBriefing;
+    if (hasPlan) {
+      setRegenError(null);
+      setShowRegenDiyModal(true);
+    } else if (hasBriefing) {
+      setRegenError(null);
+      setShowRegenExpertModal(true);
+    }
+  }
+
   async function handlePolishObservation() {
-    if (!observationDraft.trim() || !issue) return;
+    if (!observationDraft.trim() || !issue || !reportId) return;
     setPolishingObservation(true);
     setPolishError(null);
     try {
@@ -401,24 +550,24 @@ export default function IssuePage({
         userObservation: data.observation,
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
-      setObservationExpanded(false);
-      setObservationDraft("");
-
-      const hasPlan = !!(issueDetails?.materialsList?.length || issueDetails?.stepByStepPlan?.length);
-      const hasBriefing = !!issueDetails?.contractorBriefing;
-      if (hasPlan) {
-        setRegenError(null);
-        setShowRegenDiyModal(true);
-      } else if (hasBriefing) {
-        setRegenError(null);
-        setShowRegenExpertModal(true);
-      }
+      await saveIssueDetails(reportId, slug, index, updated);
+      afterObservationSaved();
     } catch (err) {
       setPolishError(err instanceof Error ? err.message : "Polish failed");
     } finally {
       setPolishingObservation(false);
     }
+  }
+
+  async function handleSaveObservationAsIs() {
+    if (!observationDraft.trim() || !reportId) return;
+    const updated: IssueDetails = {
+      ...issueDetails,
+      userObservation: observationDraft.trim(),
+    };
+    setIssueDetails(updated);
+    await saveIssueDetails(reportId, slug, index, updated);
+    afterObservationSaved();
   }
 
   function advanceToExpertModal() {
@@ -431,7 +580,7 @@ export default function IssuePage({
   }
 
   async function handleRegenDiy() {
-    if (!issue || !issueDetails) return;
+    if (!issue || !issueDetails || !reportId) return;
     setRegenDiyLoading(true);
     setRegenError(null);
     try {
@@ -451,6 +600,9 @@ export default function IssuePage({
           photoUrls: issueDetails?.photoPaths?.length
             ? Object.values(await signPaths(issueDetails.photoPaths))
             : undefined,
+          location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
+          sectionSlug: slug,
         }),
       });
       const data = await res.json();
@@ -459,9 +611,10 @@ export default function IssuePage({
         ...issueDetails,
         materialsList: data.materialsList,
         stepByStepPlan: data.stepByStepPlan,
+        safetyWarning: data.safetyWarning ?? null,
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
       advanceToExpertModal();
     } catch (err) {
       setRegenError(err instanceof Error ? err.message : "Regeneration failed");
@@ -471,10 +624,13 @@ export default function IssuePage({
   }
 
   async function handleRegenExpert() {
-    if (!issue || !issueDetails) return;
+    if (!issue || !issueDetails || !reportId) return;
     setRegenExpertLoading(true);
     setRegenError(null);
     try {
+      const photoUrls = issueDetails?.photoPaths?.length
+        ? Object.values(await signPaths(issueDetails.photoPaths))
+        : undefined;
       const res = await fetch("/api/generate-expert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -486,13 +642,16 @@ export default function IssuePage({
           equipmentSpecs: issue.equipmentSpecs,
           costEstimatePro: issue.costEstimatePro,
           userObservation: issueDetails.userObservation,
+          photoUrls,
+          location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Regeneration failed");
       const updated: IssueDetails = { ...issueDetails, contractorBriefing: data.contractorBriefing };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
       setShowRegenExpertModal(false);
     } catch (err) {
       setRegenError(err instanceof Error ? err.message : "Regeneration failed");
@@ -502,22 +661,22 @@ export default function IssuePage({
   }
 
   async function handleMoveIssue() {
-    if (!moveTarget || !report || !issue) return;
+    if (!moveTarget || !reportForIssue || !issue || !reportId) return;
     setMoving(true);
-    const newReport: ParsedReport = JSON.parse(JSON.stringify(report));
+    const newSections = reportForIssue.sections.map((s) => ({ ...s, issues: [...s.issues] }));
 
-    const srcIdx = newReport.sections.findIndex(
+    const srcIdx = newSections.findIndex(
       (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
     );
     if (srcIdx !== -1) {
-      newReport.sections[srcIdx].issues[index] = {
-        ...newReport.sections[srcIdx].issues[index],
+      newSections[srcIdx].issues[index] = {
+        ...newSections[srcIdx].issues[index],
         deleted: true,
       };
     }
 
     const targetConfig = sections.find((s) => s.slug === moveTarget);
-    const dstIdx = newReport.sections.findIndex(
+    const dstIdx = newSections.findIndex(
       (s) =>
         s.slug === moveTarget ||
         (targetConfig && normalize(s.name) === normalize(targetConfig.label))
@@ -525,19 +684,40 @@ export default function IssuePage({
     const issueCopy: Issue = { ...issue, deleted: undefined };
     let newIssueIndex: number;
     if (dstIdx === -1) {
-      newReport.sections.push({
+      newSections.push({
         name: targetConfig?.label ?? moveTarget,
         slug: moveTarget,
         issues: [issueCopy],
       });
       newIssueIndex = 0;
     } else {
-      newReport.sections[dstIdx].issues.push(issueCopy);
-      newIssueIndex = newReport.sections[dstIdx].issues.length - 1;
+      newSections[dstIdx].issues.push(issueCopy);
+      newIssueIndex = newSections[dstIdx].issues.length - 1;
     }
 
-    await updateReport(newReport);
-    router.push(`/section/${moveTarget}/issue/${newIssueIndex}`);
+    await updateReportSections(reportId, newSections);
+    await moveIssueDetails(reportId, slug, index, moveTarget, newIssueIndex);
+    router.push(`/section/${moveTarget}/issue/${newIssueIndex}?r=${reportId}`);
+  }
+
+  // D4: records a hired pro either against an existing completion, or (if the
+  // issue isn't marked complete yet) stashes it in localStorage for
+  // saveCompletion to pick up once it is — see lib/data.ts's hiredStashKey.
+  async function handleRecordHire(contractor: ContractorResult) {
+    if (!reportId) return;
+    const hired: CompletionRecord["hiredContractor"] = {
+      name: contractor.name,
+      phone: contractor.phone,
+      website: contractor.website,
+      mapsUrl: contractor.mapsUrl,
+    };
+    if (saved) {
+      await updateCompletionContractor(reportId, slug, index, hired);
+    } else {
+      try {
+        localStorage.setItem(`homesteward_hired_${issueKey(reportId, slug, index)}`, JSON.stringify(hired));
+      } catch {}
+    }
   }
 
   return (
@@ -611,7 +791,7 @@ export default function IssuePage({
                   setObservationDraft(issueDetails.userObservation ?? "");
                   setObservationExpanded(true);
                 }}
-                className="mt-2 text-xs text-porch-text-tertiary underline underline-offset-2"
+                className="btn-press mt-2 rounded-[8px] px-3 py-2.5 text-[12.5px] font-semibold text-porch-text-tertiary underline underline-offset-2"
               >
                 Edit
               </button>
@@ -624,7 +804,7 @@ export default function IssuePage({
                 placeholder="e.g. it's the mechanical kind, not a push-button..."
                 rows={4}
                 autoFocus
-                className="w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3 py-2.5 text-sm leading-relaxed text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+                className="w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3 py-2.5 text-sm leading-relaxed text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
               />
               <div className="mt-2.5 flex items-center justify-between gap-2">
                 <MicButton
@@ -639,16 +819,23 @@ export default function IssuePage({
                       setPolishError(null);
                     }}
                     disabled={polishingObservation}
-                    className="text-xs text-porch-text-tertiary disabled:opacity-50"
+                    className="btn-press rounded-[8px] px-3 py-2.5 text-[12.5px] font-semibold text-porch-text-tertiary disabled:opacity-50"
                   >
                     Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveObservationAsIs}
+                    disabled={!observationDraft.trim() || polishingObservation}
+                    className="btn-press rounded-[8px] border border-porch-border-input bg-transparent px-4 py-2 text-[13.5px] font-semibold text-porch-text disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Save as-is
                   </button>
                   <button
                     onClick={handlePolishObservation}
                     disabled={!observationDraft.trim() || polishingObservation}
                     className="btn-press rounded-[8px] border-none bg-porch-accent px-4 py-2 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {polishingObservation ? "Saving…" : "Save"}
+                    {polishingObservation ? "Saving…" : "Polish & save"}
                   </button>
                 </div>
               </div>
@@ -674,7 +861,19 @@ export default function IssuePage({
               </span>
             )}
           </div>
+          {userAccountType === "renter" && (
+            <p className="mt-2 text-[12px] leading-relaxed text-porch-text-tertiary">
+              Check your lease before modifying anything permanent — cosmetic and maintenance fixes are usually fine.
+            </p>
+          )}
           <p className="mt-2.5 font-display text-[26px] font-semibold text-porch-text">{issue.costEstimateDIY ?? "—"}</p>
+          <EstimateDisclaimer />
+
+          {bypassedDiyWarning && (
+            <p className="mt-2.5 rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700">
+              You&apos;ve chosen to proceed on a repair we&apos;d normally route to a pro.
+            </p>
+          )}
 
           {showDiyWarning ? (
             <div className="mt-2.5 space-y-2.5">
@@ -685,7 +884,7 @@ export default function IssuePage({
               </p>
               <button
                 onClick={() => setDiyUnlocked(true)}
-                className="text-xs text-porch-text-secondary underline underline-offset-2"
+                className="btn-press rounded-[8px] px-3 py-2.5 text-[12.5px] font-semibold text-porch-text-secondary underline underline-offset-2"
               >
                 I understand, show me anyway
               </button>
@@ -696,7 +895,7 @@ export default function IssuePage({
                 ✓ DIY plan ready — {issueDetails?.materialsList?.length ?? 0} materials, {issueDetails?.stepByStepPlan?.length ?? 0} steps
               </p>
               <Link
-                href={`/section/${slug}/issue/${index}/diy`}
+                href={`/section/${slug}/issue/${index}/diy?r=${reportId}`}
                 className="btn-press inline-block rounded-[10px] border-none bg-porch-accent px-4 py-2 text-[13.5px] font-semibold text-white no-underline"
               >
                 View Full Walkthrough →
@@ -713,7 +912,7 @@ export default function IssuePage({
                 disabled={generatingDiy}
                 className="btn-press w-full rounded-[10px] border-none bg-porch-accent py-3 text-[14.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {generatingDiy ? "Generating…" : "Generate DIY Plan"}
+                {generatingDiy ? diyStatus ?? "Generating…" : "Generate DIY Plan"}
               </button>
             </div>
           )}
@@ -723,6 +922,7 @@ export default function IssuePage({
         <div className="rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
           <p className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">Call an expert</p>
           <p className="mt-2.5 font-display text-[26px] font-semibold text-porch-text">{issue.costEstimatePro ?? "—"}</p>
+          <EstimateDisclaimer />
 
           {hasExpertGuide ? (
             <div className="mt-2.5">
@@ -735,15 +935,24 @@ export default function IssuePage({
               >
                 Refine This Briefing
               </button>
-              <button
-                onClick={() => setBriefingOpen((v) => !v)}
-                className="flex w-full items-center justify-between gap-2.5 border-none bg-transparent p-0"
-              >
-                <span className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">
-                  Contractor Briefing
-                </span>
-                <ChevronDownIcon style={{ transform: briefingOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s ease" }} />
-              </button>
+              <div className="flex w-full items-center justify-between gap-1.5">
+                <button
+                  onClick={() => setBriefingOpen((v) => !v)}
+                  className="flex flex-1 items-center justify-between gap-2.5 border-none bg-transparent p-0 text-left"
+                >
+                  <span className="text-[11.5px] font-semibold uppercase tracking-wide text-porch-text-tertiary">
+                    Contractor Briefing
+                  </span>
+                  <ChevronDownIcon style={{ transform: briefingOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s ease" }} />
+                </button>
+                <button
+                  onClick={handleShareBriefing}
+                  className="btn-press flex min-h-[44px] shrink-0 items-center gap-1 rounded-[8px] px-2.5 text-[11.5px] font-semibold text-porch-accent focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
+                >
+                  <ShareIcon size={13} />
+                  {briefingCopied ? "Copied ✓" : "Share"}
+                </button>
+              </div>
               {briefingOpen && (
                 <div className="mt-3.5">
                   <MarkdownProse text={issueDetails!.contractorBriefing!} />
@@ -771,7 +980,11 @@ export default function IssuePage({
                 disabled={generatingExpert}
                 className="btn-press w-full rounded-[10px] border-[1.5px] border-porch-accent bg-porch-surface py-3 text-[14.5px] font-semibold text-porch-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {generatingExpert ? "Generating…" : userLocation ? "Get Expert Guide & Find Pros" : "Get Expert Guide"}
+                {generatingExpert
+                  ? expertStatus ?? "Generating…"
+                  : userLocation
+                    ? "Get Expert Guide & Find Pros"
+                    : "Get Expert Guide"}
               </button>
             </div>
           )}
@@ -786,7 +999,6 @@ export default function IssuePage({
             </div>
             <div className="space-y-2.5">
               {contractors.map((c, i) => {
-                const isContacted = !!contacted[i];
                 const initial = c.name.trim().charAt(0).toUpperCase();
                 return (
                   <div
@@ -798,34 +1010,45 @@ export default function IssuePage({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-[14.5px] font-semibold text-porch-text">{c.name}</p>
-                      <p className="mt-0.5 text-[12.5px] text-porch-text-secondary">
-                        {c.rating !== undefined ? `${c.rating.toFixed(1)} stars` : c.address}
-                        {c.reviewCount !== undefined && ` (${c.reviewCount.toLocaleString()})`}
-                      </p>
-                      <a
-                        href={c.mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-0.5 block text-xs text-porch-text-secondary underline underline-offset-2"
-                      >
-                        View on Google Maps
-                      </a>
+                      {c.rating !== undefined && (
+                        <p className="mt-0.5 text-[12.5px] text-porch-text-secondary">
+                          ★ {c.rating.toFixed(1)}
+                          {c.reviewCount !== undefined && ` (${c.reviewCount.toLocaleString()})`}
+                        </p>
+                      )}
+                      <p className="mt-0.5 truncate text-[12.5px] text-porch-text-secondary">{c.address}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                        {c.phone && (
+                          <a
+                            href={`tel:${c.phone}`}
+                            className="text-xs text-porch-accent underline underline-offset-2"
+                          >
+                            {c.phone}
+                          </a>
+                        )}
+                        <a
+                          href={c.mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-porch-text-secondary underline underline-offset-2"
+                        >
+                          View on Google Maps
+                        </a>
+                      </div>
                     </div>
                     <button
-                      onClick={() => setContacted((prev) => ({ ...prev, [i]: true }))}
-                      disabled={isContacted}
-                      className={`btn-press shrink-0 rounded-full border px-3.5 py-2 text-[13px] font-semibold ${
-                        isContacted
-                          ? "border-porch-accent bg-porch-accent-tint text-porch-accent"
-                          : "border-porch-border-input bg-porch-surface text-porch-text"
-                      }`}
+                      onClick={() => setContactModalContractor(c)}
+                      className="btn-press shrink-0 rounded-full border border-porch-border-input bg-porch-surface px-3.5 py-2 text-[13px] font-semibold text-porch-text"
                     >
-                      {isContacted ? "Requested" : "Contact"}
+                      Contact
                     </button>
                   </div>
                 );
               })}
             </div>
+            <p className="mt-2.5 text-[11px] text-porch-text-tertiary">
+              Results sourced from Google Maps. Not vetted by Porchlight.
+            </p>
           </div>
         )}
 
@@ -839,7 +1062,7 @@ export default function IssuePage({
               <select
                 value={moveTarget}
                 onChange={(e) => setMoveTarget(e.target.value)}
-                className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text focus:outline-none"
+                className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
               >
                 <option value="">Select a section…</option>
                 {moveTargetOptions.map((opt) => (
@@ -859,15 +1082,32 @@ export default function IssuePage({
 
         {/* Mark as complete */}
         {saved ? (
-          <div className="flex items-center justify-center gap-2 rounded-2xl border border-porch-success-border bg-porch-success-bg p-[14px] text-sm font-semibold text-porch-success">
-            ✓ Marked as complete
+          <div className="space-y-2">
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-porch-success-border bg-porch-success-bg p-[14px] text-sm font-semibold text-porch-success">
+              {userAccountType === "renter" ? "✓ Marked as handled" : "✓ Marked as complete"}
+            </div>
+            {completedBy === "me" && (
+              <button
+                onClick={() => setShowShareFix(true)}
+                className="btn-press flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-2xl border border-porch-accent/40 bg-porch-accent-tint px-[14px] py-3 text-sm font-semibold text-porch-accent"
+              >
+                <ShareIcon size={14} />
+                Share this fix
+              </button>
+            )}
+            <button
+              onClick={handleMarkOpen}
+              className="btn-press flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl border border-porch-border-input bg-transparent px-[14px] py-3 text-sm font-medium text-porch-text-secondary"
+            >
+              Mark as open
+            </button>
           </div>
         ) : !showForm ? (
           <button
             onClick={() => setShowForm(true)}
             className="btn-press flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-porch-border-input bg-transparent p-[14px] text-sm font-medium text-[#6B5F55]"
           >
-            ✓ Mark as complete
+            {userAccountType === "renter" ? "✓ Mark as handled" : "✓ Mark as complete"}
           </button>
         ) : (
           <div className="space-y-5 rounded-2xl border border-porch-border bg-porch-surface p-[18px]">
@@ -875,10 +1115,15 @@ export default function IssuePage({
               <p className="text-sm font-semibold text-porch-text">Who fixed this?</p>
               <div className="flex gap-2">
                 {(
-                  [
-                    { value: "me", label: "Me" },
-                    { value: "professional", label: "A Professional" },
-                  ] as const
+                  userAccountType === "renter"
+                    ? ([
+                        { value: "me", label: "I fixed it" },
+                        { value: "professional", label: "Landlord handled it" },
+                      ] as const)
+                    : ([
+                        { value: "me", label: "Me" },
+                        { value: "professional", label: "A Professional" },
+                      ] as const)
                 ).map(({ value, label }) => (
                   <button
                     key={value}
@@ -917,6 +1162,24 @@ export default function IssuePage({
               </div>
             )}
 
+            {completedBy && (
+              <div className="space-y-1.5">
+                <p className="text-sm font-semibold text-porch-text">What did you actually pay? (optional)</p>
+                <div className="flex items-center gap-2 rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5">
+                  <span className="text-sm text-porch-text-tertiary">$</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={actualCost}
+                    onChange={(e) => setActualCost(e.target.value)}
+                    placeholder="0"
+                    className="flex-1 border-none bg-transparent text-sm text-porch-text outline-none placeholder:text-porch-text-tertiary"
+                  />
+                </div>
+                <p className="text-xs text-porch-text-tertiary">Materials, parts — whatever it cost you.</p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
@@ -926,7 +1189,7 @@ export default function IssuePage({
                 Save
               </button>
               <button
-                onClick={() => { setShowForm(false); setCompletedBy(null); setDifficulty(null); }}
+                onClick={() => { setShowForm(false); setCompletedBy(null); setDifficulty(null); setActualCost(""); }}
                 className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2 text-sm font-semibold text-porch-text-secondary"
               >
                 Cancel
@@ -948,7 +1211,7 @@ export default function IssuePage({
             placeholder="e.g. it's worse after long showers, and I'm in an older home built in 1965..."
             rows={5}
             autoFocus
-            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
           />
           <div className="mt-1.5 flex items-center justify-end">
             <MicButton
@@ -977,7 +1240,7 @@ export default function IssuePage({
       )}
 
       {showRegenDiyModal && (
-        <Modal maxWidth={420}>
+        <Modal onClose={regenDiyLoading ? undefined : advanceToExpertModal} maxWidth={420}>
           <p className="text-sm font-semibold text-porch-text">Regenerate DIY Plan?</p>
           <p className="mt-2 text-sm leading-relaxed text-porch-text-secondary">
             You already have a DIY plan for this issue. Would you like to regenerate it using your new observations?
@@ -1003,7 +1266,7 @@ export default function IssuePage({
       )}
 
       {showRegenExpertModal && (
-        <Modal maxWidth={420}>
+        <Modal onClose={regenExpertLoading ? undefined : () => setShowRegenExpertModal(false)} maxWidth={420}>
           <p className="text-sm font-semibold text-porch-text">Regenerate Contractor Briefing?</p>
           <p className="mt-2 text-sm leading-relaxed text-porch-text-secondary">
             Would you like to regenerate your contractor briefing with these new observations?
@@ -1039,6 +1302,24 @@ export default function IssuePage({
         />
       )}
 
+      {showLevelUp && <LevelUpModal skillLevel={showLevelUp} onClose={() => setShowLevelUp(null)} />}
+
+      {showShareFix && issue && (
+        <ShareFixCard
+          issueTitle={issue.title}
+          savings={completionRecord ? savingsFor(issue, completionRecord) : null}
+          onClose={() => setShowShareFix(false)}
+        />
+      )}
+
+      {contactModalContractor && (
+        <ContractorContactModal
+          contractor={contactModalContractor}
+          onClose={() => setContactModalContractor(null)}
+          onRecordHire={handleRecordHire}
+        />
+      )}
+
       <ChatFAB
         scope="issue"
         storageKey={`issue_${slug}_${index}`}
@@ -1052,7 +1333,15 @@ export default function IssuePage({
           skillLevel: userSkillLevel ?? undefined,
           effectiveSkillLevel: effectiveSkillLevel ?? undefined,
           location: userLocation ?? undefined,
+          propertyContext: propertyContext || undefined,
+          toolbox: ownedTools,
         }}
+        suggestedPrompts={[
+          "Can I do this myself?",
+          "What will this cost me?",
+          "What happens if I ignore it?",
+          "How long will this take?",
+        ]}
       />
     </div>
   );

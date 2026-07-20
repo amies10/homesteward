@@ -40,12 +40,15 @@ function toAnthropicMessages(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { messages, issueTitle, issueDescription, severity, photoUrls } = body as {
+    const { messages, issueTitle, issueDescription, severity, photoUrls, location, skillLevel, propertyContext } = body as {
       messages: StoredChatMessage[];
       issueTitle: string;
       issueDescription: string;
       severity: string;
       photoUrls?: string[];
+      location?: string;
+      skillLevel?: string;
+      propertyContext?: string;
     };
 
     if (!messages?.length) {
@@ -73,7 +76,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
       system: `You are helping a homeowner fix something in their house right now. The repair:
@@ -81,6 +84,8 @@ export async function POST(request: NextRequest) {
 Title: ${issueTitle}
 Description: ${issueDescription}
 Severity: ${severity}
+
+${propertyContext ? `About this home:\n${propertyContext}\n` : ""}${skillLevel ? `The homeowner's skill level: ${skillLevel}.` : ""}${location ? ` They're near ${location}.` : ""}
 
 Voice: talk like a retired tradesman helping a neighbor — warm, plain, direct. You've done this job a hundred times and you're glad to walk them through it.
 
@@ -100,8 +105,25 @@ If they share a photo, say what you see and what it means for the fix — specif
       messages: anthropicMessages,
     });
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    return NextResponse.json({ text: textBlock?.text ?? "" });
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
   } catch (error) {
     console.error("Error in /api/diy-chat:", error);
     return NextResponse.json(

@@ -151,3 +151,24 @@ export function CalendarIcon({ size = 20, color = "#7D234A", strokeWidth = 1.6, 
     </svg>
   );
 }
+
+export function ShareIcon({ size = 15, color = "#7D234A", strokeWidth = 1.9, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <path d="M8.6 10.5l6.8-3.9M8.6 13.5l6.8 3.9" />
+    </svg>
+  );
+}
+
+export function CartIcon({ size = 16, color = "#A99C8B", strokeWidth = 1.8, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="9" cy="21" r="1.4" />
+      <circle cx="18" cy="21" r="1.4" />
+      <path d="M2.5 3h2.4l2.6 12.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6.2" />
+    </svg>
+  );
+}

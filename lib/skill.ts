@@ -13,7 +13,7 @@ export interface EffectiveSkillResult {
 export function computeEffectiveSkill(
   base: SkillLevel,
   myCompletions: CompletionRecord[],
-  lookupIssue: (slug: string, index: number) => Issue | undefined
+  lookupIssue: (reportId: string, slug: string, index: number) => Issue | undefined
 ): EffectiveSkillResult {
   const baseRank = SKILL_RANK[base];
   const maxRank = Math.min(baseRank + 1, RANK_TO_LEVEL.length - 1);
@@ -27,7 +27,7 @@ export function computeEffectiveSkill(
       const difficulty = completion.difficulty ?? 2;
       if (difficulty > 4) continue;
 
-      const issue = lookupIssue(completion.slug, completion.issueIndex);
+      const issue = lookupIssue(completion.reportId, completion.slug, completion.issueIndex);
       if (issue?.minimumSkillLevel) {
         if (SKILL_RANK[issue.minimumSkillLevel] >= candidateRank) qualifyingCount++;
       } else {

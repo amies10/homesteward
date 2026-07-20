@@ -2,7 +2,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // globalThis singleton survives Turbopack chunk splits and HMR re-evaluation.
 declare global {
-  // eslint-disable-next-line no-var
   var __supabase: SupabaseClient | undefined;
 }
 

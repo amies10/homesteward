@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "@/app/components/AppHeader";
+import { PageSkeleton } from "@/app/components/Skeleton";
 import MonthGrid from "@/app/maintenance/components/MonthGrid";
 import DayDetailSheet from "@/app/maintenance/components/DayDetailSheet";
 import TaskManageList from "@/app/maintenance/components/TaskManageList";
 import SuggestionPicker from "@/app/maintenance/components/SuggestionPicker";
+import AgendaList from "@/app/maintenance/components/AgendaList";
 import { PlusIcon, TrashIcon } from "@/app/components/icons";
 import NotifyToggle from "@/app/components/NotifyToggle";
 import {
@@ -16,12 +18,17 @@ import {
   logCompletion,
   computeMarkers,
   computeEntriesForDate,
+  suggestedTaskNames,
+  upcomingEntries,
   todayLocal,
   type MasterTask,
   type UserTask,
   type MaintenanceLog,
   type UserTaskSelection,
 } from "@/lib/maintenance";
+import { loadPropertyDetails } from "@/lib/property";
+import { loadReports } from "@/lib/data";
+import { mergeReports } from "@/lib/sections";
 
 const RECURRENCE_OPTIONS = [1, 3, 6, 12, 24];
 
@@ -37,6 +44,7 @@ export default function MaintenancePage() {
   const [logs, setLogs] = useState<MaintenanceLog[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [savingSetup, setSavingSetup] = useState(false);
+  const [suggestedNames, setSuggestedNames] = useState<Set<string>>(new Set());
 
   const [selections, setSelections] = useState<Record<string, Selection>>({});
   const [customName, setCustomName] = useState("");
@@ -49,18 +57,48 @@ export default function MaintenancePage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showManage, setShowManage] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [view, setView] = useState<"month" | "agenda">("month");
 
   async function refetch() {
-    const [master, tasks, allLogs] = await Promise.all([loadMasterTasks(), loadUserTasks(), loadAllLogs()]);
+    const [master, tasks, allLogs, property, reports] = await Promise.all([
+      loadMasterTasks(),
+      loadUserTasks(),
+      loadAllLogs(),
+      loadPropertyDetails(),
+      loadReports(),
+    ]);
     setMasterTasks(master);
     setUserTasks(tasks);
     setLogs(allLogs);
+    const mergedIssues = mergeReports(reports)
+      .flatMap((s) => s.issues.map((ref) => ref.issue))
+      .filter((issue) => !issue.deleted);
+    setSuggestedNames(suggestedTaskNames(property, mergedIssues));
     setLoaded(true);
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount
     refetch();
   }, []);
+
+  // G1: pre-populate the first-run selection list with property-aware
+  // suggestions exactly once, after master tasks + suggestions have both
+  // loaded — not on every render (selections is user-editable afterward).
+  const prepopulatedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || userTasks.length > 0 || masterTasks.length === 0 || prepopulatedRef.current) return;
+    prepopulatedRef.current = true;
+    setSelections((prev) => {
+      const next = { ...prev };
+      for (const task of masterTasks) {
+        if (suggestedNames.has(task.name) && !next[task.id]) {
+          next[task.id] = { recurrenceMonths: task.defaultRecurrenceMonths, lastDone: "", notify: false };
+        }
+      }
+      return next;
+    });
+  }, [loaded, userTasks.length, masterTasks, suggestedNames]);
 
   const isFirstRun = loaded && userTasks.length === 0;
 
@@ -69,6 +107,7 @@ export default function MaintenancePage() {
     () => (selectedDate ? computeEntriesForDate(userTasks, logs, selectedDate) : []),
     [userTasks, logs, selectedDate]
   );
+  const agendaEntries = useMemo(() => upcomingEntries(userTasks, logs), [userTasks, logs]);
 
   const existingTaskIds = useMemo(
     () => new Set(userTasks.filter((t) => t.taskId).map((t) => t.taskId!)),
@@ -146,7 +185,7 @@ export default function MaintenancePage() {
         <span className="font-display text-[22px] font-semibold text-porch-text">Maintenance Calendar</span>
       </div>
 
-      {!loaded ? null : isFirstRun ? (
+      {!loaded ? <PageSkeleton /> : isFirstRun ? (
         <>
           <div className="px-5 pt-2">
             <p className="text-[13.5px] leading-relaxed text-porch-text-secondary">
@@ -174,7 +213,14 @@ export default function MaintenancePage() {
                         {isSelected && <span className="h-2 w-2 rounded-sm bg-white" />}
                       </div>
                       <div>
-                        <p className="text-[13.5px] font-semibold text-porch-text">{task.name}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-[13.5px] font-semibold text-porch-text">{task.name}</p>
+                          {suggestedNames.has(task.name) && (
+                            <span className="rounded-full bg-porch-accent-tint px-2 py-[1px] text-[10.5px] font-semibold text-porch-accent">
+                              Suggested for your home
+                            </span>
+                          )}
+                        </div>
                         {task.description && (
                           <p className="mt-0.5 text-[12px] text-porch-text-secondary">{task.description}</p>
                         )}
@@ -232,7 +278,7 @@ export default function MaintenancePage() {
                 onChange={(e) => setCustomName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") addCustomTaskDraft(); }}
                 placeholder="Custom task name"
-                className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface px-3 py-2.5 text-[13.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+                className="flex-1 rounded-[10px] border border-porch-border-input bg-porch-surface px-3 py-2.5 text-[13.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
               />
               <button
                 onClick={addCustomTaskDraft}
@@ -258,24 +304,44 @@ export default function MaintenancePage() {
         </>
       ) : (
         <>
-          <div className="px-5 pt-2">
+          <div className="flex items-center justify-between px-5 pt-2">
             <button
               onClick={() => setShowManage(true)}
               className="text-[13px] font-semibold text-porch-accent"
             >
               Manage tasks
             </button>
+            <div className="flex gap-1.5">
+              {(["month", "agenda"] as const).map((v) => {
+                const active = view === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={`btn-press whitespace-nowrap rounded-full border-[1.5px] px-3.5 py-[7px] text-[13px] font-semibold ${
+                      active ? "border-porch-accent bg-porch-accent text-white" : "border-porch-border-input bg-porch-surface text-[#6B5F55]"
+                    }`}
+                  >
+                    {v === "month" ? "Calendar" : "Next 90 days"}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="mx-5 mt-3">
-            <MonthGrid
-              year={year}
-              month={month}
-              markers={markers}
-              selectedDate={selectedDate}
-              onSelectDay={setSelectedDate}
-              onPrevMonth={goPrevMonth}
-              onNextMonth={goNextMonth}
-            />
+            {view === "month" ? (
+              <MonthGrid
+                year={year}
+                month={month}
+                markers={markers}
+                selectedDate={selectedDate}
+                onSelectDay={setSelectedDate}
+                onPrevMonth={goPrevMonth}
+                onNextMonth={goNextMonth}
+              />
+            ) : (
+              <AgendaList entries={agendaEntries} onLogComplete={handleLogComplete} />
+            )}
           </div>
         </>
       )}
@@ -302,6 +368,7 @@ export default function MaintenancePage() {
         <SuggestionPicker
           masterTasks={masterTasks}
           existingTaskIds={existingTaskIds}
+          suggestedNames={suggestedNames}
           onClose={() => setShowSuggestions(false)}
           onSaved={refetch}
         />

@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import AppHeader from "@/app/components/AppHeader";
+import { PageSkeleton } from "@/app/components/Skeleton";
 import SkillLevelPicker from "@/app/components/SkillLevelPicker";
+import AccountTypePicker from "@/app/components/AccountTypePicker";
+import Modal from "@/app/components/Modal";
 import { CheckIcon, ChevronRightIcon, CameraIcon } from "@/app/components/icons";
-import { loadUserProfile, updateProfileFields, loadLatestReport, loadAllMyCompletions } from "@/lib/data";
+import { loadUserProfile, updateProfileFields, loadReports, loadAllMyCompletions } from "@/lib/data";
 import { computeEffectiveSkill } from "@/lib/skill";
 import { uploadAvatar, downscaleImage, getSignedUrl } from "@/lib/storage";
 import { supabase } from "@/lib/supabase-client";
-import { sections, normalize, type SkillLevel } from "@/lib/sections";
+import { sections, normalize, type SkillLevel, type UserProfile } from "@/lib/sections";
 
 const SKILL_LABEL: Record<SkillLevel, string> = {
   beginner: "Beginner",
@@ -18,12 +21,22 @@ const SKILL_LABEL: Record<SkillLevel, string> = {
   expert: "Expert",
 };
 
+const ACCOUNT_TYPE_LABEL: Record<NonNullable<UserProfile["accountType"]>, string> = {
+  owner: "Owner",
+  renter: "Renter",
+  prebuy: "Evaluating a home to buy",
+};
+
 export default function ProfilePage() {
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [skillLevel, setSkillLevel] = useState<SkillLevel | null>(null);
   const [earnedSkillLevel, setEarnedSkillLevel] = useState<SkillLevel | null>(null);
   const [location, setLocation] = useState("");
+  const [accountType, setAccountType] = useState<UserProfile["accountType"]>("owner");
+  const [showAccountTypeModal, setShowAccountTypeModal] = useState(false);
+  const [pendingAccountType, setPendingAccountType] = useState<UserProfile["accountType"] | null>(null);
+  const [savingAccountType, setSavingAccountType] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -35,17 +48,19 @@ export default function ProfilePage() {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user?.email) setEmail(data.user.email);
     });
-    Promise.all([loadUserProfile(), loadLatestReport(), loadAllMyCompletions()]).then(
-      async ([profile, report, myCompletions]) => {
+    Promise.all([loadUserProfile(), loadReports(), loadAllMyCompletions()]).then(
+      async ([profile, reports, myCompletions]) => {
         if (profile) {
           setDisplayName(profile.displayName ?? "");
           setSkillLevel(profile.skillLevel);
           setLocation(profile.location);
+          setAccountType(profile.accountType ?? "owner");
           if (profile.avatarPath) {
             const url = await getSignedUrl(profile.avatarPath);
             setAvatarUrl(url);
           }
-          const lookupIssue = (issueSlug: string, index: number) => {
+          const lookupIssue = (reportId: string, issueSlug: string, index: number) => {
+            const report = reports.find((r) => r.id === reportId);
             const cfg = sections.find((sc) => sc.slug === issueSlug);
             const sec = report?.sections.find(
               (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
@@ -78,6 +93,23 @@ export default function ProfilePage() {
     }
   }
 
+  function openAccountTypeModal() {
+    setPendingAccountType(accountType);
+    setShowAccountTypeModal(true);
+  }
+
+  async function handleConfirmAccountType() {
+    if (!pendingAccountType || pendingAccountType === accountType) {
+      setShowAccountTypeModal(false);
+      return;
+    }
+    setSavingAccountType(true);
+    await updateProfileFields({ accountType: pendingAccountType });
+    setAccountType(pendingAccountType);
+    setSavingAccountType(false);
+    setShowAccountTypeModal(false);
+  }
+
   async function handleSave() {
     if (!skillLevel || !location.trim()) return;
     setSaving(true);
@@ -102,7 +134,9 @@ export default function ProfilePage() {
         <span className="font-display text-[22px] font-semibold text-porch-text">Profile</span>
       </div>
 
-      {loaded && (
+      {!loaded ? (
+        <PageSkeleton />
+      ) : (
         <>
           <div className="flex justify-center px-5 pt-6">
             <input
@@ -186,6 +220,19 @@ export default function ProfilePage() {
             />
           </div>
 
+          <div className="px-5 pb-1 pt-[26px]">
+            <div className="text-[15.5px] font-semibold text-porch-text">Account type</div>
+            <div className="mt-2.5 flex items-center justify-between rounded-2xl border border-porch-border bg-porch-surface px-4 py-4">
+              <span className="text-[14.5px] text-porch-text">{ACCOUNT_TYPE_LABEL[accountType ?? "owner"]}</span>
+              <button
+                onClick={openAccountTypeModal}
+                className="btn-press rounded-[8px] px-2 py-1.5 text-[13.5px] font-semibold text-porch-accent focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
+              >
+                Change
+              </button>
+            </div>
+          </div>
+
           <div className="px-5 pt-[26px] space-y-2.5">
             <Link
               href="/toolbox"
@@ -215,6 +262,22 @@ export default function ProfilePage() {
             </button>
           </div>
         </>
+      )}
+
+      {showAccountTypeModal && (
+        <Modal onClose={() => setShowAccountTypeModal(false)} maxWidth={400} maxHeight="80vh">
+          <div className="mb-3.5 flex items-center justify-between">
+            <span className="font-display text-lg font-semibold text-porch-text">Account type</span>
+          </div>
+          <AccountTypePicker value={pendingAccountType} onChange={setPendingAccountType} />
+          <button
+            onClick={handleConfirmAccountType}
+            disabled={!pendingAccountType || savingAccountType}
+            className="btn-press mt-4 flex w-full items-center justify-center rounded-[10px] border-none bg-porch-accent py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {savingAccountType ? "Saving…" : "Confirm"}
+          </button>
+        </Modal>
       )}
     </div>
   );

@@ -7,35 +7,61 @@ import {
   sections,
   normalize,
   diyKey,
-  type ParsedReport,
+  savingsFor,
+  SKILL_RANK,
+  type StoredReport,
   type IssueDetails,
   type StoredChatMessage,
   type CompletionRecord,
+  type UserProfile,
+  type SkillLevel,
+  type Issue,
 } from "@/lib/sections";
-import { loadLatestReport, loadIssueDetails, saveIssueDetails, saveCompletion } from "@/lib/data";
+import {
+  loadReports,
+  loadIssueDetails,
+  saveIssueDetails,
+  saveCompletion,
+  loadUserProfile,
+  loadAllMyCompletions,
+} from "@/lib/data";
+import { computeEffectiveSkill } from "@/lib/skill";
 import { loadToolbox, addTools, isToolHeuristic } from "@/lib/toolbox";
+import { isOwned } from "@/lib/toolbox-match";
 import { signPaths } from "@/lib/storage";
+import { loadPropertyDetails } from "@/lib/property";
+import { propertyContextLines } from "@/lib/ai-context";
+import { streamChat } from "@/lib/chat-stream";
 import ToolSuggestSheet from "@/app/components/ToolSuggestSheet";
+import LevelUpModal from "@/app/components/LevelUpModal";
 import MicButton from "@/app/components/MicButton";
 import Modal from "@/app/components/Modal";
 import BottomSheet from "@/app/components/BottomSheet";
 import AssistantAvatar from "@/app/components/AssistantAvatar";
+import ShareFixCard from "@/app/components/ShareFixCard";
 import { renderInlineMarkdown } from "@/app/components/inlineMarkdown";
-import { CameraIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
+import { CameraIcon, CartIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, PlayIcon, SendIcon, SettingsIcon, XIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
 import CalendarButton from "@/app/components/CalendarButton";
 
 export default function DIYPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string; issueIndex: string }>;
+  searchParams: Promise<{ r?: string }>;
 }) {
   const router = useRouter();
   const { slug, issueIndex } = use(params);
+  const { r } = use(searchParams);
   const index = parseInt(issueIndex, 10);
   const sectionConfig = sections.find((s) => s.slug === slug);
 
-  const [issue, setIssue] = useState<ParsedReport["sections"][0]["issues"][0] | null>(null);
+  const [issue, setIssue] = useState<StoredReport["sections"][0]["issues"][0] | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [reports, setReports] = useState<StoredReport[]>([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [myCompletions, setMyCompletions] = useState<CompletionRecord[]>([]);
   const [issueDetails, setIssueDetails] = useState<IssueDetails | null>(null);
   const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
   const [chatMessages, setChatMessages] = useState<StoredChatMessage[]>([]);
@@ -58,13 +84,21 @@ export default function DIYPage({
   const [stepGenerating, setStepGenerating] = useState<Record<number, boolean>>({});
   const [stepDetail, setStepDetail] = useState<Record<number, string>>({});
   const [showCongrats, setShowCongrats] = useState(false);
+  const [finishedRecord, setFinishedRecord] = useState<CompletionRecord | null>(null);
+  const [showShareFix, setShowShareFix] = useState(false);
   const [suggestedTools, setSuggestedTools] = useState<string[]>([]);
   const [ownedTools, setOwnedTools] = useState<string[]>([]);
   const [finishing, setFinishing] = useState(false);
   const [finishPressed, setFinishPressed] = useState(false);
+  const [showFinishForm, setShowFinishForm] = useState(false);
+  const [finishDifficulty, setFinishDifficulty] = useState<number | null>(null);
+  const [finishActualCost, setFinishActualCost] = useState("");
+  const [showLevelUp, setShowLevelUp] = useState<SkillLevel | null>(null);
   const [cardDragDx, setCardDragDx] = useState(0);
   const [cardDragging, setCardDragging] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(375);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [propertyContext, setPropertyContext] = useState("");
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +113,13 @@ export default function DIYPage({
   const stepsLengthRef = useRef(0);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-API reads (window size, matchMedia), must run client-side post-hydration
     setViewportWidth(window.innerWidth);
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReducedMotion(mq.matches);
+    const handleChange = () => setPrefersReducedMotion(mq.matches);
+    mq.addEventListener("change", handleChange);
+    return () => mq.removeEventListener("change", handleChange);
   }, []);
 
   useEffect(() => {
@@ -87,30 +127,52 @@ export default function DIYPage({
   }, [stepIndex]);
 
   useEffect(() => {
-    loadLatestReport().then((report) => {
-      if (!report) return;
-      const reportSection = report.sections.find(
-        (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
-      );
-      setIssue(reportSection?.issues[index] ?? null);
-    });
+    Promise.all([loadReports(), loadUserProfile(), loadAllMyCompletions()]).then(
+      ([loadedReports, loadedProfile, allMyCompletions]) => {
+        setReports(loadedReports);
+        setProfile(loadedProfile);
+        setMyCompletions(allMyCompletions);
 
-    loadIssueDetails(slug, index).then((details) => {
-      if (details) setIssueDetails(details);
-    });
+        const resolvedReportId = r ?? loadedReports[0]?.id ?? null;
+        setReportId(resolvedReportId);
+        if (!resolvedReportId) return;
+
+        const reportForIssue = loadedReports.find((rp) => rp.id === resolvedReportId);
+        const reportSection = reportForIssue?.sections.find(
+          (s) => s.slug === slug || (sectionConfig && normalize(s.name) === normalize(sectionConfig.label))
+        );
+        setIssue(reportSection?.issues[index] ?? null);
+
+        loadIssueDetails(resolvedReportId, slug, index).then((details) => {
+          if (details) {
+            setIssueDetails(details);
+            if (details.stepElaborations) {
+              setStepDetail(details.stepElaborations);
+              setStepExpanded(
+                Object.keys(details.stepElaborations).reduce<Record<number, boolean>>((acc, k) => {
+                  acc[Number(k)] = true;
+                  return acc;
+                }, {})
+              );
+            }
+          }
+        });
+
+        const sKey = diyKey(resolvedReportId, slug, index, "steps");
+        const cKey = diyKey(resolvedReportId, slug, index, "chat");
+
+        try {
+          const s = localStorage.getItem(sKey);
+          if (s) setCheckedSteps(JSON.parse(s));
+          const c = localStorage.getItem(cKey);
+          if (c) setChatMessages(JSON.parse(c));
+        } catch {}
+      }
+    );
 
     loadToolbox().then((tools) => setOwnedTools(tools.map((t) => t.toolName)));
-
-    const sKey = diyKey(slug, index, "steps");
-    const cKey = diyKey(slug, index, "chat");
-
-    try {
-      const s = localStorage.getItem(sKey);
-      if (s) setCheckedSteps(JSON.parse(s));
-      const c = localStorage.getItem(cKey);
-      if (c) setChatMessages(JSON.parse(c));
-    } catch {}
-  }, [slug, index, sectionConfig]);
+    loadPropertyDetails().then((property) => setPropertyContext(propertyContextLines(property)));
+  }, [slug, index, r, sectionConfig]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -119,7 +181,7 @@ export default function DIYPage({
   function toggleStep(i: number) {
     const next = { ...checkedSteps, [i]: !checkedSteps[i] };
     setCheckedSteps(next);
-    localStorage.setItem(diyKey(slug, index, "steps"), JSON.stringify(next));
+    if (reportId) localStorage.setItem(diyKey(reportId, slug, index, "steps"), JSON.stringify(next));
   }
 
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -134,13 +196,14 @@ export default function DIYPage({
     e.target.value = "";
   }
 
-  async function sendMessage() {
-    if (!inputText.trim() && !pendingImage) return;
+  async function sendMessage(textOverride?: string) {
+    const text = (textOverride ?? inputText).trim();
+    if (!text && !pendingImage) return;
     if (!issue) return;
 
     const userMsg: StoredChatMessage = {
       role: "user",
-      text: inputText.trim(),
+      text,
       imageBase64: pendingImage?.base64,
       imageMimeType: pendingImage?.mimeType,
       timestamp: new Date().toISOString(),
@@ -148,48 +211,50 @@ export default function DIYPage({
 
     const updatedMessages = [...chatMessages, userMsg];
     setChatMessages(updatedMessages);
-    localStorage.setItem(diyKey(slug, index, "chat"), JSON.stringify(updatedMessages));
+    if (reportId) localStorage.setItem(diyKey(reportId, slug, index, "chat"), JSON.stringify(updatedMessages));
     setInputText("");
     setPendingImage(null);
     setChatLoading(true);
     setChatError(null);
 
+    const placeholder: StoredChatMessage = { role: "assistant", text: "", timestamp: new Date().toISOString() };
+    setChatMessages([...updatedMessages, placeholder]);
+
     try {
-      const res = await fetch("/api/diy-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const photoUrls = issueDetails?.photoPaths?.length
+        ? Object.values(await signPaths(issueDetails.photoPaths))
+        : undefined;
+
+      const finalText = await streamChat(
+        "/api/diy-chat",
+        {
           messages: updatedMessages,
           issueTitle: issue.title,
           issueDescription: issue.description,
           severity: issue.severity,
-          photoUrls: issueDetails?.photoPaths?.length
-            ? Object.values(await signPaths(issueDetails.photoPaths))
-            : undefined,
-        }),
-      });
+          photoUrls,
+          location: profile?.location ?? undefined,
+          skillLevel: profile?.skillLevel ?? undefined,
+          propertyContext: propertyContext || undefined,
+        },
+        (accumulated) => {
+          setChatMessages((prev) => prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: accumulated } : m)));
+        }
+      );
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Request failed");
-
-      const assistantMsg: StoredChatMessage = {
-        role: "assistant",
-        text: data.text,
-        timestamp: new Date().toISOString(),
-      };
-
-      const withReply = [...updatedMessages, assistantMsg];
+      const withReply = [...updatedMessages, { ...placeholder, text: finalText }];
       setChatMessages(withReply);
-      localStorage.setItem(diyKey(slug, index, "chat"), JSON.stringify(withReply));
+      if (reportId) localStorage.setItem(diyKey(reportId, slug, index, "chat"), JSON.stringify(withReply));
     } catch (err) {
       setChatError(err instanceof Error ? err.message : "Failed to get response");
+      setChatMessages(updatedMessages);
     } finally {
       setChatLoading(false);
     }
   }
 
   async function handleRefine() {
-    if (!refineFeedback.trim() || !issue || !issueDetails) return;
+    if (!refineFeedback.trim() || !issue || !issueDetails || !reportId) return;
     setRefining(true);
     setRefineError(null);
     try {
@@ -209,6 +274,9 @@ export default function DIYPage({
           photoUrls: issueDetails.photoPaths?.length
             ? Object.values(await signPaths(issueDetails.photoPaths))
             : undefined,
+          location: profile?.location ?? undefined,
+          propertyContext: propertyContext || undefined,
+          sectionSlug: slug,
         }),
       });
       const data = await res.json();
@@ -217,13 +285,15 @@ export default function DIYPage({
         ...issueDetails,
         materialsList: data.materialsList,
         stepByStepPlan: data.stepByStepPlan,
+        safetyWarning: data.safetyWarning ?? null,
+        stepElaborations: {},
       };
       setIssueDetails(updated);
-      await saveIssueDetails(slug, index, updated);
+      await saveIssueDetails(reportId, slug, index, updated);
       setCheckedSteps({});
       setStepExpanded({});
       setStepDetail({});
-      localStorage.removeItem(diyKey(slug, index, "steps"));
+      localStorage.removeItem(diyKey(reportId, slug, index, "steps"));
       setShowRefineModal(false);
       setRefineFeedback("");
     } catch (err) {
@@ -249,8 +319,21 @@ export default function DIYPage({
         }),
       });
       const data = await res.json();
-      setStepDetail((prev) => ({ ...prev, [i]: res.ok ? data.detail : "Couldn't load more detail right now." }));
-      setStepExpanded((prev) => ({ ...prev, [i]: true }));
+      if (res.ok) {
+        setStepDetail((prev) => ({ ...prev, [i]: data.detail }));
+        setStepExpanded((prev) => ({ ...prev, [i]: true }));
+        if (reportId) {
+          const updatedDetails: IssueDetails = {
+            ...issueDetails,
+            stepElaborations: { ...issueDetails?.stepElaborations, [String(i)]: data.detail },
+          };
+          setIssueDetails(updatedDetails);
+          await saveIssueDetails(reportId, slug, index, updatedDetails);
+        }
+      } else {
+        setStepDetail((prev) => ({ ...prev, [i]: "Couldn't load more detail right now." }));
+        setStepExpanded((prev) => ({ ...prev, [i]: true }));
+      }
     } catch {
       setStepDetail((prev) => ({ ...prev, [i]: "Couldn't load more detail right now." }));
       setStepExpanded((prev) => ({ ...prev, [i]: true }));
@@ -264,24 +347,19 @@ export default function DIYPage({
     setStepIndex(Math.max(0, Math.min(total - 1, i)));
   }
 
-  // Same completion flow as "Mark as Complete" on the issue detail page
-  // (lib/data.ts saveCompletion — always resolves, falling back to
-  // localStorage-only if Supabase is unreachable, so no try/catch needed
-  // here either, matching that page). Work Mode's finish doesn't collect a
-  // difficulty rating, so completedBy is always "me" with no difficulty
-  // (both optional on CompletionRecord).
-  async function handleFinishRepair() {
-    if (finishing) return;
-    setFinishing(true);
-    const record: CompletionRecord = {
-      slug,
-      issueIndex: index,
-      completedBy: "me",
-      completedAt: new Date().toISOString(),
-    };
-    await saveCompletion(record);
-    setFinishing(false);
+  function lookupIssueInReports(repId: string, issueSlug: string, idx: number): Issue | undefined {
+    const rpt = reports.find((rp) => rp.id === repId);
+    const cfg = sections.find((sc) => sc.slug === issueSlug);
+    const sec = rpt?.sections.find(
+      (s) => s.slug === issueSlug || (cfg && normalize(s.name) === normalize(cfg.label))
+    );
+    return sec?.issues[idx];
+  }
 
+  // Shared tail once the completion is saved (and any level-up modal has been
+  // seen) — shows the tool-suggestion sheet if there are unowned tools in the
+  // materials list, otherwise goes straight to the congrats screen.
+  async function proceedAfterSave() {
     if (issueDetails?.materialsList?.length) {
       const owned = new Set((await loadToolbox()).map((t) => t.toolName.toLowerCase()));
       const suggestions = issueDetails.materialsList
@@ -293,6 +371,51 @@ export default function DIYPage({
       }
     }
     setShowCongrats(true);
+  }
+
+  // Same completion flow as "Mark as Complete" on the issue detail page
+  // (lib/data.ts saveCompletion — always resolves, falling back to
+  // localStorage-only if Supabase is unreachable, so no try/catch needed
+  // here either, matching that page). Unlike before, Work Mode's finish now
+  // collects a difficulty rating (required) and an optional actual cost via
+  // the showFinishForm overlay before this runs.
+  async function handleFinishRepair() {
+    if (finishing || !reportId || finishDifficulty === null) return;
+    setFinishing(true);
+
+    const parsedCost = finishActualCost.trim() ? parseFloat(finishActualCost) : NaN;
+    const record: CompletionRecord = {
+      slug,
+      issueIndex: index,
+      reportId,
+      completedBy: "me",
+      difficulty: finishDifficulty,
+      completedAt: new Date().toISOString(),
+      ...(finishActualCost.trim() && !isNaN(parsedCost) ? { actualCost: parsedCost } : {}),
+    };
+
+    const before = profile
+      ? computeEffectiveSkill(profile.skillLevel, myCompletions, lookupIssueInReports)
+      : null;
+
+    await saveCompletion(record);
+    setFinishing(false);
+    setShowFinishForm(false);
+    setFinishedRecord(record);
+
+    let leveledUpTo: SkillLevel | null = null;
+    if (before && profile) {
+      const updatedCompletions = [...myCompletions, record];
+      const after = computeEffectiveSkill(profile.skillLevel, updatedCompletions, lookupIssueInReports);
+      setMyCompletions(updatedCompletions);
+      if (SKILL_RANK[after.effective] > SKILL_RANK[before.effective]) leveledUpTo = after.effective;
+    }
+
+    if (leveledUpTo) {
+      setShowLevelUp(leveledUpTo);
+    } else {
+      await proceedAfterSave();
+    }
   }
 
   function setCardDx(dx: number) {
@@ -418,6 +541,8 @@ export default function DIYPage({
   }, [workModeOpen]);
 
   const materials = issueDetails?.materialsList ?? [];
+  const ownedMaterialItems = materials.filter((m) => isOwned(m.item, ownedTools)).map((m) => m.item);
+  const missingMaterialsCount = materials.filter((m) => !isOwned(m.item, ownedTools)).length;
   const steps = issueDetails?.stepByStepPlan ?? [];
   const stepsCheckedCount = steps.filter((_, i) => checkedSteps[i]).length;
 
@@ -425,34 +550,58 @@ export default function DIYPage({
     stepsLengthRef.current = steps.length;
   }, [steps.length]);
 
+  const lastChatMessage = chatMessages[chatMessages.length - 1];
+  const lastAssistantChatText = lastChatMessage?.role === "assistant" ? lastChatMessage.text : "";
+  const DIY_CHAT_SUGGESTED_PROMPTS = [
+    "What tools do I actually need?",
+    "How do I know when it's done right?",
+    "What's the most common mistake here?",
+  ];
+
   const chatBody = (
     <>
       {chatMessages.length === 0 && !chatLoading && (
-        <p className="pt-6 text-center text-[13.5px] text-porch-text-faint">
-          No messages yet — ask below and I&apos;ll walk through it with you.
-        </p>
+        <div className="pt-6 text-center">
+          <p className="text-[13.5px] text-porch-text-faint">
+            No messages yet — ask below and I&apos;ll walk through it with you.
+          </p>
+          <div className="mt-3.5 flex flex-wrap justify-center gap-2 px-2">
+            {DIY_CHAT_SUGGESTED_PROMPTS.map((prompt, i) => (
+              <button
+                key={i}
+                onClick={() => sendMessage(prompt)}
+                className="btn-press rounded-full border border-porch-accent/40 bg-porch-accent-tint px-3.5 py-2.5 text-[13px] text-porch-accent"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       <div className="space-y-3">
-        {chatMessages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                msg.role === "user"
-                  ? "border border-porch-border bg-porch-surface text-porch-text"
-                  : "border border-[#ECE0E6] bg-porch-accent-tint text-porch-text"
-              }`}
-            >
-              {msg.imageBase64 && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`} alt="Uploaded" className="mb-2 max-h-48 rounded-lg object-contain" />
-              )}
-              {msg.text && (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
-              )}
+        {chatMessages.map((msg, i) => {
+          if (!msg.text && !msg.imageBase64) return null;
+          return (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  msg.role === "user"
+                    ? "border border-porch-border bg-porch-surface text-porch-text"
+                    : "border border-[#ECE0E6] bg-porch-accent-tint text-porch-text"
+                }`}
+              >
+                {msg.imageBase64 && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={`data:${msg.imageMimeType};base64,${msg.imageBase64}`} alt="Uploaded" className="mb-2 max-h-48 rounded-lg object-contain" />
+                )}
+                {msg.text && (
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderInlineMarkdown(msg.text)}</p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
-        {chatLoading && (
+          );
+        })}
+        {chatLoading && lastAssistantChatText === "" && (
           <div className="flex justify-start">
             <div className="rounded-2xl border border-porch-border bg-porch-surface px-4 py-2.5">
               <p className="text-sm text-porch-text-tertiary">Thinking…</p>
@@ -471,7 +620,10 @@ export default function DIYPage({
         <div className="mb-2 flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={pendingImage.previewUrl} alt="Pending" className="h-12 w-12 rounded-lg object-cover" />
-          <button onClick={() => setPendingImage(null)} className="text-xs text-porch-text-tertiary">
+          <button
+            onClick={() => setPendingImage(null)}
+            className="btn-press rounded-[8px] px-3 py-2.5 text-xs font-semibold text-porch-text-tertiary"
+          >
             Remove
           </button>
         </div>
@@ -506,7 +658,7 @@ export default function DIYPage({
           <CameraIcon />
         </button>
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           disabled={chatLoading || (!inputText.trim() && !pendingImage)}
           aria-label="Send"
           className="btn-press flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border-none bg-porch-accent disabled:opacity-50"
@@ -523,7 +675,7 @@ export default function DIYPage({
   return (
     <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
       <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-porch-border bg-porch-surface px-5 py-2.5">
-        <Link href={`/section/${slug}/issue/${index}`} className="flex min-w-0 items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
+        <Link href={`/section/${slug}/issue/${index}?r=${reportId}`} className="flex min-w-0 items-center gap-1.5 text-[13.5px] text-porch-text-secondary no-underline">
           <ChevronLeftIcon size={15} />
           <span className="truncate">{issue?.title ?? "Issue"}</span>
         </Link>
@@ -543,7 +695,14 @@ export default function DIYPage({
       <div className="sticky top-[42px] z-[9] flex items-center justify-between gap-3 border-b border-porch-border bg-porch-bg px-5 py-3.5">
         <span className="font-display text-[21px] font-semibold text-porch-text">DIY Walkthrough</span>
         <button
-          onClick={() => { setWorkModeOpen(true); setStepIndex(0); setShowCongrats(false); }}
+          onClick={() => {
+            setWorkModeOpen(true);
+            setStepIndex(0);
+            setShowCongrats(false);
+            setShowFinishForm(false);
+            setFinishDifficulty(null);
+            setFinishActualCost("");
+          }}
           disabled={steps.length === 0}
           className="btn-press flex shrink-0 items-center gap-1.5 rounded-full border-none bg-porch-accent px-4 py-2.5 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -551,6 +710,22 @@ export default function DIYPage({
           Enter Work Mode
         </button>
       </div>
+
+      {issueDetails?.safetyWarning && (
+        <div className="px-5 pb-1 pt-2.5">
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-[18px] text-red-800">
+            <div className="flex items-start gap-2.5">
+              <span aria-hidden="true" className="text-lg leading-none">⚠</span>
+              <div className="space-y-2">
+                <p className="text-sm leading-relaxed">{issueDetails.safetyWarning}</p>
+                <p className="text-xs font-semibold leading-relaxed">
+                  Stop and call a pro if anything looks different from these instructions.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-5 pb-1 pt-2.5">
         {materials.length > 0 && (
@@ -564,12 +739,54 @@ export default function DIYPage({
             </button>
             {materialsOpen && (
               <div>
-                {materials.map((m, i) => (
-                  <div key={i} className="flex items-center gap-3 border-t border-[#F2EBE1] py-2.5">
-                    <span className="flex-1 text-sm leading-relaxed text-porch-text">{m.item}</span>
-                    <span className="shrink-0 text-[13px] text-porch-text-tertiary">{m.estimatedCost}</span>
-                  </div>
-                ))}
+                {/* TODO(affiliate): populate purchaseUrl and make this row a real link list once shopping links exist */}
+                <button
+                  disabled
+                  title="Shopping links coming soon"
+                  className="flex min-h-[44px] w-full cursor-not-allowed items-center gap-2 border-t border-[#F2EBE1] py-2.5 text-left opacity-60"
+                >
+                  <CartIcon size={15} />
+                  <span className="flex-1 text-[13px] font-medium text-porch-text-secondary">Buy what you&apos;re missing</span>
+                  {missingMaterialsCount > 0 && (
+                    <span className="shrink-0 rounded-full bg-porch-bg px-2 py-0.5 text-[11px] font-medium text-porch-text-tertiary">
+                      {missingMaterialsCount}
+                    </span>
+                  )}
+                </button>
+                {ownedMaterialItems.length > 0 && (
+                  <p className="border-t border-[#F2EBE1] pt-2.5 text-[12.5px] leading-relaxed text-porch-text-secondary">
+                    You already own {ownedMaterialItems.length === materials.length ? "everything on this list." : (
+                      <>
+                        {ownedMaterialItems.join(", ")} — you&apos;ll need to pick up the rest.
+                      </>
+                    )}
+                  </p>
+                )}
+                {materials.map((m, i) => {
+                  const owned = isOwned(m.item, ownedTools);
+                  return (
+                    <div key={i} className="flex items-center gap-3 border-t border-[#F2EBE1] py-2.5">
+                      {m.purchaseUrl ? (
+                        <a
+                          href={m.purchaseUrl}
+                          target="_blank"
+                          rel="noopener noreferrer sponsored"
+                          className="flex-1 text-sm leading-relaxed text-porch-accent underline underline-offset-2"
+                        >
+                          {m.item}
+                        </a>
+                      ) : (
+                        <span className="flex-1 text-sm leading-relaxed text-porch-text">{m.item}</span>
+                      )}
+                      {owned && (
+                        <span className="shrink-0 rounded-full bg-porch-success-bg px-2 py-0.5 text-[11px] font-medium text-porch-success">
+                          ✓ owned
+                        </span>
+                      )}
+                      <span className="shrink-0 text-[13px] text-porch-text-tertiary">{m.estimatedCost}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -591,7 +808,7 @@ export default function DIYPage({
                 <div className="mt-2.5 text-right">
                   <button
                     onClick={() => { setShowRefineModal(true); setRefineError(null); }}
-                    className="border-none bg-transparent p-0 text-[12.5px] font-semibold text-porch-accent underline"
+                    className="btn-press rounded-[8px] px-3 py-2.5 text-[12.5px] font-semibold text-porch-accent underline"
                   >
                     Refine This Plan
                   </button>
@@ -626,7 +843,7 @@ export default function DIYPage({
           <div className="rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
             <p className="text-sm text-porch-text-secondary">
               No DIY plan generated yet.{" "}
-              <Link href={`/section/${slug}/issue/${index}`} className="text-porch-accent underline underline-offset-2">
+              <Link href={`/section/${slug}/issue/${index}?r=${reportId}`} className="text-porch-accent underline underline-offset-2">
                 Go back and click &quot;Generate DIY Plan&quot;
               </Link>{" "}
               to create one.
@@ -669,7 +886,7 @@ export default function DIYPage({
             placeholder="e.g. the shutoff valve isn't where the plan says, I don't have a tile saw..."
             rows={5}
             autoFocus
-            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            className="mt-3.5 w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
           />
           <div className="mt-1.5 flex items-center justify-end">
             <MicButton onTranscript={(t) => setRefineFeedback((prev) => (prev ? `${prev} ${t}` : t))} disabled={refining} />
@@ -731,7 +948,7 @@ export default function DIYPage({
             <div
               style={{
                 transform: `translateX(${liveTranslate}px)`,
-                transition: cardDragging ? "none" : "transform 0.32s cubic-bezier(0.2,0.8,0.2,1)",
+                transition: cardDragging || prefersReducedMotion ? "none" : "transform 0.32s cubic-bezier(0.2,0.8,0.2,1)",
               }}
               className="flex h-full"
             >
@@ -742,6 +959,19 @@ export default function DIYPage({
                 return (
                   <div key={i} style={{ width: viewportWidth }} className="flex h-full shrink-0 flex-col px-4 pb-3.5 pt-2">
                     <div className="flex flex-1 flex-col overflow-y-auto rounded-3xl border border-porch-border bg-porch-surface p-6 shadow-[0_2px_10px_rgba(38,34,32,0.05)]">
+                      {i === 0 && issueDetails?.safetyWarning && (
+                        <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-3.5 text-red-800">
+                          <div className="flex items-start gap-2">
+                            <span aria-hidden="true" className="text-base leading-none">⚠</span>
+                            <div className="space-y-1.5">
+                              <p className="text-[13px] leading-relaxed">{issueDetails.safetyWarning}</p>
+                              <p className="text-[11.5px] font-semibold leading-relaxed">
+                                Stop and call a pro if anything looks different from these instructions.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex shrink-0 items-start justify-between gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-porch-accent-tint font-display text-[17px] font-bold text-porch-accent">
                           {i + 1}
@@ -761,7 +991,7 @@ export default function DIYPage({
                         {!expanded && !generating && (
                           <button
                             onClick={() => requestStepDetail(i, stepText)}
-                            className="mt-4 border-none bg-transparent p-0 text-sm font-semibold text-porch-accent underline"
+                            className="btn-press mt-4 rounded-[8px] px-3 py-2.5 text-sm font-semibold text-porch-accent underline"
                           >
                             Give me more detail
                           </button>
@@ -789,7 +1019,7 @@ export default function DIYPage({
                     Tap the circle once you&apos;ve finished the repair.
                   </div>
                   <button
-                    onClick={handleFinishRepair}
+                    onClick={() => setShowFinishForm(true)}
                     onPointerDown={() => setFinishPressed(true)}
                     onPointerUp={() => setFinishPressed(false)}
                     onPointerLeave={() => setFinishPressed(false)}
@@ -859,6 +1089,79 @@ export default function DIYPage({
             />
           )}
 
+          {showFinishForm && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-5 bg-porch-bg p-8 text-center"
+            >
+              <div className="w-full max-w-[320px] space-y-5 text-left">
+                <div className="space-y-2">
+                  <p className="text-center font-display text-xl font-semibold text-porch-text">How difficult was it?</p>
+                  <div className="flex justify-center gap-2">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setFinishDifficulty(n)}
+                        className={`btn-press h-11 w-11 rounded-[10px] border text-sm font-semibold ${
+                          finishDifficulty === n
+                            ? "border-porch-accent bg-porch-accent text-white"
+                            : "border-porch-border-input bg-porch-surface text-porch-text"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-center text-xs text-porch-text-tertiary">1 = Easy, 5 = Very Difficult</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-sm font-semibold text-porch-text">What did you actually pay? (optional)</p>
+                  <div className="flex items-center gap-2 rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5">
+                    <span className="text-sm text-porch-text-tertiary">$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={finishActualCost}
+                      onChange={(e) => setFinishActualCost(e.target.value)}
+                      placeholder="0"
+                      className="flex-1 border-none bg-transparent text-sm text-porch-text outline-none placeholder:text-porch-text-tertiary"
+                    />
+                  </div>
+                  <p className="text-xs text-porch-text-tertiary">Materials, parts — whatever it cost you.</p>
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    onClick={handleFinishRepair}
+                    disabled={finishDifficulty === null || finishing}
+                    className="btn-press w-full rounded-full border-none bg-porch-accent px-7 py-3 text-[14.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {finishing ? "Saving…" : "Save & finish"}
+                  </button>
+                  <button
+                    onClick={() => setShowFinishForm(false)}
+                    disabled={finishing}
+                    className="btn-press w-full rounded-full border-[1.5px] border-porch-border-input bg-transparent px-7 py-3 text-[14.5px] font-semibold text-porch-text-secondary disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showLevelUp && (
+            <LevelUpModal
+              skillLevel={showLevelUp}
+              onClose={async () => {
+                setShowLevelUp(null);
+                await proceedAfterSave();
+              }}
+            />
+          )}
+
           {showCongrats && (
             <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-4.5 bg-porch-bg p-8 text-center">
               <div className="flex h-20 w-20 items-center justify-center rounded-full bg-porch-accent shadow-[0_6px_18px_rgba(125,35,74,0.35)]">
@@ -876,13 +1179,27 @@ export default function DIYPage({
                   Back to Home
                 </button>
                 <button
-                  onClick={() => router.push(`/section/${slug}/issue/${index}`)}
+                  onClick={() => router.push(`/section/${slug}/issue/${index}?r=${reportId}`)}
                   className="btn-press w-full rounded-full border-[1.5px] border-porch-accent bg-transparent px-7 py-3 text-[14.5px] font-semibold text-porch-accent"
                 >
                   Back to Repair
                 </button>
+                <button
+                  onClick={() => setShowShareFix(true)}
+                  className="btn-press w-full rounded-full border-none bg-transparent px-7 py-3 text-[14.5px] font-semibold text-porch-text-secondary underline underline-offset-2"
+                >
+                  Share this win
+                </button>
               </div>
             </div>
+          )}
+
+          {showShareFix && issue && (
+            <ShareFixCard
+              issueTitle={issue.title}
+              savings={finishedRecord ? savingsFor(issue, finishedRecord) : null}
+              onClose={() => setShowShareFix(false)}
+            />
           )}
         </div>
       )}

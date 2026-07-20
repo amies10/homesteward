@@ -60,7 +60,8 @@ export default function MonthGrid({ year, month, markers, selectedDate, onSelect
             <button
               key={cell.date}
               onClick={() => onSelectDay(cell.date)}
-              className={`btn-press flex flex-col items-center gap-0.5 rounded-[8px] py-1.5 ${
+              aria-label={`${cell.date}${status ? `, ${status}` : ""}`}
+              className={`btn-press flex flex-col items-center gap-1 rounded-[8px] py-1.5 ${
                 isSelected ? "bg-porch-accent-tint" : ""
               }`}
             >
@@ -69,10 +70,7 @@ export default function MonthGrid({ year, month, markers, selectedDate, onSelect
               >
                 {cell.day}
               </span>
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ background: status ? DOT_COLOR[status] : "transparent" }}
-              />
+              <DayMarker status={status} />
             </button>
           );
         })}
@@ -80,15 +78,26 @@ export default function MonthGrid({ year, month, markers, selectedDate, onSelect
 
       <div className="mt-4 flex items-center justify-center gap-4 border-t border-porch-border pt-3.5 text-[11.5px] text-porch-text-secondary">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ background: DOT_COLOR.due }} /> Due
+          <DayMarker status="due" /> Due
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ background: DOT_COLOR.overdue }} /> Overdue
+          <DayMarker status="overdue" /> Overdue
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ background: DOT_COLOR.completed }} /> Done
+          <DayMarker status="completed" /> Done
         </span>
       </div>
     </div>
   );
+}
+
+function DayMarker({ status }: { status?: DayStatus }) {
+  if (!status) return <span className="h-2 w-2" />;
+  if (status === "due") {
+    return <span className="h-2 w-2 rounded-full border-[2px]" style={{ borderColor: DOT_COLOR.due }} />;
+  }
+  if (status === "overdue") {
+    return <span className="h-[7px] w-[7px] rotate-45 rounded-[1px]" style={{ background: DOT_COLOR.overdue }} />;
+  }
+  return <span className="h-2 w-2 rounded-full" style={{ background: DOT_COLOR.completed }} />;
 }

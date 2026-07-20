@@ -12,7 +12,8 @@ const TILES = [
   { href: "/profile", label: "Profile", desc: "Name, photo, skill level, and location" },
   { href: "/property", label: "Property Details", desc: "Year built, systems, and specs" },
   { href: "/toolbox", label: "Toolbox", desc: "Tools you already own" },
-  { href: "/report", label: "Inspection Report", desc: "Download or replace your report" },
+  { href: "/report", label: "Home Reports", desc: "Inspection reports and other assessments" },
+  { href: "/documents", label: "Document Vault", desc: "Manuals, warranties, invoices, and permits" },
 ] as const;
 
 export default function SettingsPage() {

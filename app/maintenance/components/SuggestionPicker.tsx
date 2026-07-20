@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/app/components/Modal";
 import { CheckIcon } from "@/app/components/icons";
 import NotifyToggle from "@/app/components/NotifyToggle";
@@ -17,13 +17,32 @@ interface Selection {
 interface Props {
   masterTasks: MasterTask[];
   existingTaskIds: Set<string>;
+  suggestedNames?: Set<string>;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export default function SuggestionPicker({ masterTasks, existingTaskIds, onClose, onSaved }: Props) {
+export default function SuggestionPicker({ masterTasks, existingTaskIds, suggestedNames, onClose, onSaved }: Props) {
   const [selections, setSelections] = useState<Record<string, Selection>>({});
   const [saving, setSaving] = useState(false);
+
+  // Pre-check non-already-added suggested tasks once, the same pattern as
+  // the maintenance page's own first-run pre-population.
+  const prepopulatedRef = useRef(false);
+  useEffect(() => {
+    if (prepopulatedRef.current || !suggestedNames || masterTasks.length === 0) return;
+    prepopulatedRef.current = true;
+    setSelections((prev) => {
+      const next = { ...prev };
+      for (const task of masterTasks) {
+        if (existingTaskIds.has(task.id)) continue;
+        if (suggestedNames.has(task.name) && !next[task.id]) {
+          next[task.id] = { recurrenceMonths: task.defaultRecurrenceMonths, lastDone: "", notify: false };
+        }
+      }
+      return next;
+    });
+  }, [masterTasks, existingTaskIds, suggestedNames]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, MasterTask[]> = {};
@@ -107,7 +126,14 @@ export default function SuggestionPicker({ masterTasks, existingTaskIds, onClose
                         {(alreadyAdded || isSelected) && <CheckIcon size={12} strokeWidth={3} />}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[13.5px] font-semibold text-porch-text">{task.name}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-[13.5px] font-semibold text-porch-text">{task.name}</p>
+                          {suggestedNames?.has(task.name) && (
+                            <span className="rounded-full bg-porch-accent-tint px-2 py-[1px] text-[10.5px] font-semibold text-porch-accent">
+                              Suggested for your home
+                            </span>
+                          )}
+                        </div>
                         {alreadyAdded ? (
                           <p className="mt-0.5 text-[12px] text-porch-text-tertiary">Already on your calendar</p>
                         ) : (

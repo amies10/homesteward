@@ -5,12 +5,16 @@ import Link from "next/link";
 import {
   sections,
   normalize,
+  savingsFor,
   type Issue,
   type CompletionRecord,
   type SectionConfig,
 } from "@/lib/sections";
-import { loadLatestReport, loadCompletions } from "@/lib/data";
+import { loadReports, loadCompletions, removeCompletion, loadUserProfile } from "@/lib/data";
 import Modal from "@/app/components/Modal";
+import { PageSkeleton } from "@/app/components/Skeleton";
+import EstimateDisclaimer from "@/app/components/EstimateDisclaimer";
+import ShareFixCard from "@/app/components/ShareFixCard";
 import { ChevronLeftIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
 import CalendarButton from "@/app/components/CalendarButton";
@@ -30,26 +34,12 @@ interface CompletedItem {
   issueIndex: number;
 }
 
-function parseMidpoint(cost?: string | null): number | null {
-  if (!cost) return null;
-  const nums = [...cost.matchAll(/[\d,]+/g)].map((m) => parseInt(m[0].replace(/,/g, ""), 10));
-  if (nums.length < 2 || nums.some(isNaN)) return null;
-  return Math.round((nums[0] + nums[1]) / 2);
-}
-
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
 function formatDollars(n: number): string {
   return "$" + n.toLocaleString("en-US");
-}
-
-function savingsFor(item: CompletedItem): number | null {
-  if (item.record.completedBy !== "me") return null;
-  const pro = parseMidpoint(item.issue.costEstimatePro);
-  const diy = parseMidpoint(item.issue.costEstimateDIY);
-  return pro !== null && diy !== null ? pro - diy : null;
 }
 
 type Filter = "all" | "me" | "pro";
@@ -61,12 +51,17 @@ export default function CompletedPage() {
   const [search, setSearch] = useState("");
   const [sectionFilter, setSectionFilter] = useState<string>("all");
   const [showSavings, setShowSavings] = useState(false);
+  const [shareItem, setShareItem] = useState<CompletedItem | null>(null);
+  const [isRenter, setIsRenter] = useState(false);
 
   useEffect(() => {
-    Promise.all([loadLatestReport(), loadCompletions()]).then(([report, completions]) => {
+    loadUserProfile().then((profile) => setIsRenter(profile?.accountType === "renter"));
+    Promise.all([loadReports(), loadCompletions()]).then(([reports, completions]) => {
       const result: CompletedItem[] = [];
+      const reportById = new Map(reports.map((r) => [r.id, r]));
 
       for (const [, record] of Object.entries(completions)) {
+        const report = reportById.get(record.reportId);
         if (!report) continue;
 
         // Find the section in the actual report data (slug-or-name match) —
@@ -97,13 +92,29 @@ export default function CompletedPage() {
     });
   }, []);
 
+  // C1: un-completing a fix doesn't need a full refetch — just drop it from
+  // the local list once the underlying record is removed.
+  async function handleUndo(item: CompletedItem) {
+    await removeCompletion(item.record.reportId, item.record.slug ?? item.section.slug, item.issueIndex);
+    setItems((prev) =>
+      prev.filter(
+        (x) =>
+          !(
+            x.record.reportId === item.record.reportId &&
+            (x.record.slug ?? x.section.slug) === (item.record.slug ?? item.section.slug) &&
+            x.issueIndex === item.issueIndex
+          )
+      )
+    );
+  }
+
   const total = items.length;
   const byMe = items.filter((x) => x.record.completedBy === "me").length;
   const byPro = items.filter((x) => x.record.completedBy === "professional").length;
 
   let totalSavings: number | null = null;
   for (const item of items) {
-    const s = savingsFor(item);
+    const s = savingsFor(item.issue, item.record);
     if (s !== null) totalSavings = (totalSavings ?? 0) + s;
   }
 
@@ -145,7 +156,7 @@ export default function CompletedPage() {
         <HomeButton size={18} />
       </header>
 
-      {!loaded ? null : total === 0 ? (
+      {!loaded ? <PageSkeleton /> : total === 0 ? (
         <div className="mx-5 mt-6 rounded-2xl border border-porch-border bg-porch-surface px-6 py-10 text-center">
           <p className="text-sm text-porch-text-secondary">
             No completed fixes yet.{" "}
@@ -191,6 +202,7 @@ export default function CompletedPage() {
                 {totalSavings !== null ? `~${formatDollars(totalSavings)}` : "—"}
               </div>
               <div className="mt-0.5 text-[12.5px] text-porch-text-secondary">Est. Savings</div>
+              <EstimateDisclaimer />
             </button>
           </div>
 
@@ -200,7 +212,7 @@ export default function CompletedPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search completed fixes..."
-              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
             />
             <div className="flex gap-2 overflow-x-auto pb-0.5 pt-3">
               {sectionChips.map((chip) => {
@@ -235,44 +247,79 @@ export default function CompletedPage() {
                 </div>
                 <div className="space-y-2.5">
                   {sectionItems.map((item) => {
-                    const savings = savingsFor(item);
+                    const savings = savingsFor(item.issue, item.record);
                     return (
-                      <Link
-                        key={`${item.section.slug}-${item.issueIndex}`}
-                        href={`/section/${item.section.slug}/issue/${item.issueIndex}?from=completed`}
-                        className="block rounded-2xl border border-porch-border bg-porch-surface px-[18px] py-4 no-underline"
+                      <div
+                        key={`${item.record.reportId}-${item.section.slug}-${item.issueIndex}`}
+                        className="relative rounded-2xl border border-porch-border bg-porch-surface"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="text-[15px] font-semibold leading-snug text-porch-text">{item.issue.title}</span>
-                          <span className="shrink-0 whitespace-nowrap rounded-full bg-porch-accent-tint px-2.5 py-[3px] text-[11.5px] font-semibold text-[#6B5F55]">
-                            {TYPE_LABEL[item.issue.severity]}
-                          </span>
-                        </div>
-                        <div className="mt-2.5 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
-                          <span>
-                            Fixed by{" "}
-                            <strong className="font-semibold text-porch-text">
-                              {item.record.completedBy === "me" ? "Me" : "A Professional"}
-                            </strong>
-                          </span>
-                          <span>
-                            Completed <strong className="font-semibold text-porch-text">{formatDate(item.record.completedAt)}</strong>
-                          </span>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
-                          <span>
-                            DIY <strong className="font-semibold text-porch-text">{item.issue.costEstimateDIY ?? "—"}</strong>
-                          </span>
-                          <span>
-                            Pro <strong className="font-semibold text-porch-text">{item.issue.costEstimatePro ?? "—"}</strong>
-                          </span>
-                          {savings !== null && (
-                            <span>
-                              Saved <strong className="font-semibold text-porch-accent">~{formatDollars(savings)}</strong>
+                        <Link
+                          href={`/section/${item.section.slug}/issue/${item.issueIndex}?r=${item.record.reportId}&from=completed`}
+                          className="block px-[18px] pb-11 pt-4 no-underline"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <span className="text-[15px] font-semibold leading-snug text-porch-text">{item.issue.title}</span>
+                            <span className="shrink-0 whitespace-nowrap rounded-full bg-porch-accent-tint px-2.5 py-[3px] text-[11.5px] font-semibold text-[#6B5F55]">
+                              {TYPE_LABEL[item.issue.severity]}
                             </span>
-                          )}
-                        </div>
-                      </Link>
+                          </div>
+                          <div className="mt-2.5 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
+                            <span>
+                              {item.record.completedBy === "me" || !isRenter ? (
+                                <>
+                                  Fixed by{" "}
+                                  <strong className="font-semibold text-porch-text">
+                                    {item.record.completedBy === "me" ? "Me" : "A Professional"}
+                                  </strong>
+                                </>
+                              ) : (
+                                <strong className="font-semibold text-porch-text">Handled by landlord</strong>
+                              )}
+                            </span>
+                            <span>
+                              Completed <strong className="font-semibold text-porch-text">{formatDate(item.record.completedAt)}</strong>
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-porch-text-secondary">
+                            <span>
+                              DIY <strong className="font-semibold text-porch-text">{item.issue.costEstimateDIY ?? "—"}</strong>
+                            </span>
+                            <span>
+                              Pro <strong className="font-semibold text-porch-text">{item.issue.costEstimatePro ?? "—"}</strong>
+                            </span>
+                            {item.record.actualCost !== undefined && (
+                              <span>
+                                Paid <strong className="font-semibold text-porch-text">{formatDollars(item.record.actualCost)}</strong>
+                              </span>
+                            )}
+                            {savings !== null && (
+                              <span>
+                                Saved <strong className="font-semibold text-porch-accent">~{formatDollars(savings)}</strong>
+                              </span>
+                            )}
+                          </div>
+                        </Link>
+                        {item.record.completedBy === "me" && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShareItem(item);
+                            }}
+                            className="btn-press absolute bottom-2 left-3.5 min-h-[34px] rounded-full border border-porch-border-input bg-porch-surface px-3.5 py-2 text-[12px] font-semibold text-porch-accent focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
+                          >
+                            Share
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUndo(item);
+                          }}
+                          className="btn-press absolute bottom-2 right-3.5 min-h-[34px] rounded-full border border-porch-border-input bg-porch-surface px-3.5 py-2 text-[12px] font-semibold text-porch-text-secondary focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
+                        >
+                          Undo — mark as open
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -288,10 +335,11 @@ export default function CompletedPage() {
             <span className="font-display text-lg font-semibold text-porch-text">Estimated Savings</span>
           </div>
           <p className="mb-3.5 text-[13px] text-porch-text-secondary">What doing it yourself saved you, fix by fix.</p>
+          <EstimateDisclaimer />
           {items.map((item) => {
-            const savings = savingsFor(item);
+            const savings = savingsFor(item.issue, item.record);
             return (
-              <div key={`${item.section.slug}-${item.issueIndex}`} className="flex items-center justify-between gap-3 border-t border-[#ECE0D8] py-3">
+              <div key={`${item.record.reportId}-${item.section.slug}-${item.issueIndex}`} className="flex items-center justify-between gap-3 border-t border-[#ECE0D8] py-3">
                 <span className="text-sm leading-snug text-porch-text">{item.issue.title}</span>
                 <span className="shrink-0 text-[14.5px] font-semibold text-porch-accent">
                   {savings !== null ? `~${formatDollars(savings)}` : "—"}
@@ -300,6 +348,14 @@ export default function CompletedPage() {
             );
           })}
         </Modal>
+      )}
+
+      {shareItem && (
+        <ShareFixCard
+          issueTitle={shareItem.issue.title}
+          savings={savingsFor(shareItem.issue, shareItem.record)}
+          onClose={() => setShareItem(null)}
+        />
       )}
     </div>
   );

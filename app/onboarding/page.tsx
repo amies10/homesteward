@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveUserProfile, loadUserProfile, loadLatestReport } from "@/lib/data";
+import { saveUserProfile, loadUserProfile, loadReports } from "@/lib/data";
 import type { UserProfile } from "@/lib/sections";
 import Logo from "@/app/components/Logo";
 import SkillLevelPicker from "@/app/components/SkillLevelPicker";
+import AccountTypePicker from "@/app/components/AccountTypePicker";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [accountType, setAccountType] = useState<UserProfile["accountType"] | null>(null);
   const [skillLevel, setSkillLevel] = useState<UserProfile["skillLevel"] | null>(null);
   const [location, setLocation] = useState("");
   const [saving, setSaving] = useState(false);
@@ -21,16 +23,18 @@ export default function OnboardingPage() {
         router.replace("/");
         return;
       }
+      if (profile?.accountType) setAccountType(profile.accountType);
       if (profile?.skillLevel) setSkillLevel(profile.skillLevel);
       if (profile?.location) setLocation(profile.location);
     });
-    loadLatestReport().then((report) => setHasReport(!!report));
+    loadReports().then((reports) => setHasReport(reports.length > 0));
   }, [router]);
 
   async function handleFinish() {
     if (!skillLevel || !location.trim()) return;
     setSaving(true);
     await saveUserProfile({
+      accountType: accountType ?? undefined,
       skillLevel,
       location: location.trim(),
       onboardingCompleted: true,
@@ -48,16 +52,37 @@ export default function OnboardingPage() {
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-12">
         <div className="mb-9 flex items-center gap-2">
-          {[1, 2].map((n) => (
+          {[1, 2, 3].map((n) => (
             <div
               key={n}
               className={`h-1.5 w-8 rounded-full transition-colors ${n <= step ? "bg-porch-accent" : "bg-porch-border"}`}
             />
           ))}
-          <span className="ml-2 text-xs text-porch-text-tertiary">Step {step} of 2</span>
+          <span className="ml-2 text-xs text-porch-text-tertiary">Step {step} of 3</span>
         </div>
 
         {step === 1 ? (
+          <div>
+            <h1 className="mb-1 font-display text-2xl font-semibold text-porch-text">
+              What brings you to Porchlight?
+            </h1>
+            <p className="mb-8 text-[14px] text-porch-text-secondary">
+              We&apos;ll tailor guidance and language to your situation.
+            </p>
+
+            <AccountTypePicker value={accountType} onChange={setAccountType} />
+
+            <div className="mt-8 flex justify-end">
+              <button
+                onClick={() => setStep(2)}
+                disabled={!accountType}
+                className="btn-press rounded-[10px] border-none bg-porch-accent px-6 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        ) : step === 2 ? (
           <div>
             <h1 className="mb-1 font-display text-2xl font-semibold text-porch-text">
               How comfortable are you with home repairs?
@@ -70,9 +95,15 @@ export default function OnboardingPage() {
 
             <SkillLevelPicker value={skillLevel} onChange={setSkillLevel} />
 
-            <div className="mt-8 flex justify-end">
+            <div className="mt-8 flex items-center justify-between">
               <button
-                onClick={() => setStep(2)}
+                onClick={() => setStep(1)}
+                className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2.5 text-sm font-semibold text-porch-text-secondary"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={() => setStep(3)}
                 disabled={!skillLevel}
                 className="btn-press rounded-[10px] border-none bg-porch-accent px-6 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -99,12 +130,12 @@ export default function OnboardingPage() {
               }}
               placeholder="Enter your zip code or city, state"
               autoFocus
-              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-3 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+              className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-3 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
             />
 
             <div className="mt-8 flex items-center justify-between">
               <button
-                onClick={() => setStep(1)}
+                onClick={() => setStep(2)}
                 className="btn-press rounded-[10px] border border-porch-border-input bg-porch-surface px-4 py-2.5 text-sm font-semibold text-porch-text-secondary"
               >
                 ← Back

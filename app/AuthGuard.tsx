@@ -28,6 +28,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     const isNeutral = NEUTRAL_PATHS.some((p) => pathname.startsWith(p));
 
     if (isNeutral) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- pathname-gated early exit, not a render-derivable value
       setReady(true);
       return;
     }

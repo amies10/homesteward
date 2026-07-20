@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 const client = new Anthropic();
 
 export async function POST(request: NextRequest) {
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest) {
       model: "claude-sonnet-4-6",
       max_tokens: 32000,
       system:
-        "You are an expert home inspector report analyzer. Extract all deficiencies, repair items, safety concerns, and maintenance notes from home inspection reports. Return only valid JSON with no surrounding text or markdown.",
+        "You are an expert home-assessment document analyzer. You read any document about the condition of a home — inspection reports, contractor punch lists or estimates, improvement assessments, municipal or insurance inspection reports, appraisal condition notes, handwritten walk-through lists — and extract every issue, deficiency, recommended action, or planned improvement into structured data. Return only valid JSON with no surrounding text or markdown.",
       messages: [
         {
           role: "user",
@@ -42,29 +44,20 @@ export async function POST(request: NextRequest) {
             },
             {
               type: "text",
-              text: `Read this home inspection report and extract every issue, deficiency, repair item, safety concern, and maintenance note.
+              text: `Read this home assessment document and extract every issue, deficiency, repair item, safety concern, maintenance note, and recommended improvement you can find.
 
-Categorize each issue into one of these home sections (use these exact names):
-- Exterior
-- Roofing
-- Structure
-- Attic and Insulation
-- Interior
-- Heating and Air Conditioning
-- Electrical
-- Plumbing
-- Bathrooms
-- Appliances
+First, identify what kind of document this is (e.g. "Home Inspection Report", "Contractor Punch List", "Improvement Assessment", "Municipal Inspection", "Insurance Inspection", or your best short label).
 
-For each issue, assign a severity:
-- "safety": Safety hazards requiring immediate attention
-- "repair": Items needing repair or replacement
-- "maintenance": Routine maintenance items
-- "improvement": Recommended improvements or upgrades
-- "fyi": Informational notes, no action required
+Categorize each issue into one of these home sections when it fits (use these exact names): Exterior, Roofing, Structure, Attic and Insulation, Interior, Heating and Air Conditioning, Electrical, Plumbing, Bathrooms, Appliances.
+
+If an issue doesn't fit any of those, create a custom section with a short descriptive name (e.g. "Pool & Spa", "Detached Garage", "Landscaping"). Prefer the standard sections; only create a custom section when nothing fits.
+
+For each issue, assign a severity: "safety" (hazards requiring immediate attention), "repair" (needs repair or replacement), "maintenance" (routine maintenance), "improvement" (recommended upgrade), "fyi" (informational, no action needed).
 
 Return a JSON object in this exact structure, with no other text:
 {
+  "documentType": "Home Inspection Report",
+  "parserNote": null,
   "propertyAddress": "123 Main St, Anytown, CA 90210",
   "propertyDetails": {
     "yearBuilt": 1998,
@@ -98,6 +91,8 @@ Return a JSON object in this exact structure, with no other text:
   ]
 }
 
+For documentType: your short label for what this document is. For parserNote: null when the document parsed cleanly; when the document is unusual/ambiguous/doesn't map neatly to home sections, do a best-effort extraction anyway and set parserNote to one friendly sentence for the homeowner (e.g. "This looks like a contractor estimate — we've done our best to organize it. You can edit any section or issue that doesn't look right.").
+
 For propertyAddress: extract the subject property address from the report if it appears (typically on the cover page, header, or client information section). Set to null if not found.
 
 For propertyDetails: extract every field only when the report actually states it (cover page, general property description, or system-specific sections). Set any field to null when the report doesn't mention it — never guess. otherSpecs is an array of any other notable property specs the report mentions that don't fit the named fields (e.g. garage, pool, deck, sump pump); return an empty array if none.
@@ -115,7 +110,7 @@ If costEstimateDIY is null (not DIY-appropriate), still set minimumSkillLevel to
 
 For equipmentSpecs, list the key tools and equipment a homeowner or contractor would need for this repair — concise names only, no costs. If no special tools are needed, return an empty array.
 
-Only include sections that have at least one issue. If this is not a home inspection report or no issues are found, return {"sections": []}.`,
+Never return an empty result silently. If you can find even one actionable item, return it. Only if the document contains no home-condition information at all, return {"documentType": "<your label>", "parserNote": "We couldn't find home issues in this document — it looks like a <label>. Try uploading an inspection report or contractor assessment.", "sections": []}.`,
             },
           ],
         },

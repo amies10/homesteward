@@ -42,6 +42,11 @@ interface AssistantChatContext {
   issueTitle?: string;
   issueDescription?: string;
   issueSeverity?: string;
+  propertyContext?: string;
+  toolbox?: string[];
+  openIssues?: { section: string; title: string; severity: string }[];
+  completedSummary?: { total: number; byMe: number; recent: string[] };
+  equipmentSpecs?: string[];
 }
 
 function buildSystemPrompt(scope: "global" | "section" | "issue", context: AssistantChatContext): string {
@@ -67,8 +72,19 @@ Stay strictly on topic: home repair, maintenance, and this homeowner's property.
     .filter(Boolean)
     .join(" ");
 
+  const homeProfileBlock = `Here's what you know about their home and history:
+${context.propertyContext || "(no property details on file)"}
+Tools they own: ${context.toolbox?.join(", ") || "(none recorded)"}
+Fixes completed: ${
+    context.completedSummary
+      ? `${context.completedSummary.total} total, ${context.completedSummary.byMe} DIY — most recent: ${context.completedSummary.recent.join("; ")}`
+      : "none yet"
+  }`;
+
   if (scope === "issue") {
     return `${base} ${profileLine}
+
+${homeProfileBlock}
 
 You're currently focused on this specific issue from their inspection report:
 Title: ${context.issueTitle}
@@ -84,19 +100,34 @@ Answer questions about this issue specifically — whether to DIY or call a pro,
       .join("\n");
     return `${base} ${profileLine}
 
+${homeProfileBlock}
+
 You're currently focused on the "${context.sectionName}" section of their home. Here are the known issues in this section:
 ${issueList || "(no issues logged yet)"}
 
 Answer questions about this section — what to prioritize, what an issue means, what to expect. Keep answers concise and practical.`;
   }
 
-  const sectionList = (context.sections ?? [])
-    .map((s) => `- ${s.name}: ${s.issueCount} open issue${s.issueCount === 1 ? "" : "s"}`)
-    .join("\n");
+  const openIssues = context.openIssues ?? [];
+  const shown = openIssues.slice(0, 60);
+  const bySection = new Map<string, { title: string; severity: string }[]>();
+  for (const issue of shown) {
+    const list = bySection.get(issue.section) ?? [];
+    list.push({ title: issue.title, severity: issue.severity });
+    bySection.set(issue.section, list);
+  }
+  const remaining = openIssues.length - shown.length;
+  const issuesBySection =
+    Array.from(bySection.entries())
+      .map(([section, issues]) => `${section}:\n${issues.map((i) => `- ${i.title} (${i.severity})`).join("\n")}`)
+      .join("\n\n") + (remaining > 0 ? `\n\n…and ${remaining} more` : "");
+
   return `${base} ${profileLine}
 
-Here's an overview of their home's inspection report by section:
-${sectionList || "(no report uploaded yet)"}
+${homeProfileBlock}
+
+Here's an overview of their home's open inspection issues by section:
+${issuesBySection || "(no open issues — nothing outstanding right now)"}
 
 Answer questions about their home overall — what to tackle next, how sections relate, general guidance. Keep answers concise, warm, and practical.`;
 }
@@ -114,15 +145,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No messages provided" }, { status: 400 });
     }
 
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 2048,
       system: buildSystemPrompt(scope, context ?? {}),
       messages: toAnthropicMessages(messages),
     });
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    return NextResponse.json({ text: textBlock?.type === "text" ? textBlock.text : "" });
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
   } catch (error) {
     console.error("Error in /api/assistant-chat:", error);
     return NextResponse.json({ error: "Failed to get response" }, { status: 500 });

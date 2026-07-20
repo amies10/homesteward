@@ -3,11 +3,12 @@
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { sections, normalize, type Issue, type ParsedReport, type ReportSection } from "@/lib/sections";
-import { loadLatestReport, updateReport, saveCompletion, saveIssueDetails, getCurrentReportId } from "@/lib/data";
+import { sections, normalize, mergeReports, slugify, type Issue, type StoredReport, type ReportSection } from "@/lib/sections";
+import { loadReports, ensureBaseReport, updateReportSections, saveCompletion, saveIssueDetails } from "@/lib/data";
 import { uploadIssuePhoto } from "@/lib/storage";
 import { supabase } from "@/lib/supabase-client";
 import Modal from "@/app/components/Modal";
+import { PageSkeleton } from "@/app/components/Skeleton";
 import { PlusIcon, XIcon } from "@/app/components/icons";
 import HomeButton from "@/app/components/HomeButton";
 import CalendarButton from "@/app/components/CalendarButton";
@@ -22,7 +23,7 @@ export default function AddIssuePage({
   const router = useRouter();
   const { section: preselectedSection } = use(searchParams);
 
-  const [report, setReport] = useState<ParsedReport | null>(null);
+  const [reports, setReports] = useState<StoredReport[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const [type, setType] = useState<AddType>("issue");
@@ -43,16 +44,16 @@ export default function AddIssuePage({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadLatestReport().then((r) => {
-      setReport(r);
+    loadReports().then((r) => {
+      setReports(r);
       setLoaded(true);
     });
   }, []);
 
-  const customSections = (report?.sections.filter((s) => s.userAdded && s.slug) ?? []).map((s) => ({
-    slug: s.slug!,
-    label: s.name,
-  }));
+  const mergedSections = mergeReports(reports);
+  const customSections = mergedSections
+    .filter((s) => !sections.some((std) => std.slug === s.slug))
+    .map((s) => ({ slug: s.slug, label: s.name }));
   const sectionChips = [
     ...sections.map((s) => ({ slug: s.slug, label: s.label })),
     ...customSections,
@@ -67,48 +68,47 @@ export default function AddIssuePage({
   }
 
   async function handleAddSection() {
-    if (!newSectionName.trim() || !report) return;
+    if (!newSectionName.trim()) return;
     setAddingSectionLoading(true);
+    try {
+      const base = await ensureBaseReport();
+      const name = newSectionName.trim();
+      const slugBase = slugify(name);
+      const taken = new Set([...sections.map((s) => s.slug), ...mergedSections.map((s) => s.slug)]);
+      let slug = slugBase;
+      let n = 2;
+      while (taken.has(slug)) { slug = `${slugBase}-${n}`; n++; }
 
-    const name = newSectionName.trim();
-    const base = name.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-");
-    const taken = new Set([
-      ...sections.map((s) => s.slug),
-      ...report.sections.filter((s) => s.slug).map((s) => s.slug!),
-    ]);
-    let slug = base;
-    let n = 2;
-    while (taken.has(slug)) { slug = `${base}-${n}`; n++; }
-
-    const newSection: ReportSection = {
-      name,
-      description: newSectionDesc.trim() || undefined,
-      slug,
-      userAdded: true,
-      issues: [],
-    };
-    const newReport: ParsedReport = { ...report, sections: [...report.sections, newSection] };
-    await updateReport(newReport);
-    setReport(newReport);
-    setSection(slug);
-    setShowAddSection(false);
-    setNewSectionName("");
-    setNewSectionDesc("");
-    setAddingSectionLoading(false);
+      const newSection: ReportSection = {
+        name,
+        description: newSectionDesc.trim() || undefined,
+        slug,
+        userAdded: true,
+        issues: [],
+      };
+      const targetReport = reports.find((r) => r.id === base.id) ?? base;
+      await updateReportSections(base.id, [...targetReport.sections, newSection]);
+      setReports(await loadReports());
+      setSection(slug);
+    } finally {
+      setShowAddSection(false);
+      setNewSectionName("");
+      setNewSectionDesc("");
+      setAddingSectionLoading(false);
+    }
   }
 
   async function handleSubmit() {
     if (!title.trim() || submitting || submitted) return;
     setSubmitting(true);
 
+    const base = await ensureBaseReport();
+    const targetReport = reports.find((r) => r.id === base.id) ?? base;
     const sectionConfig = sections.find((s) => s.slug === section);
-    const baseReport: ParsedReport = report ?? { sections: [] };
-    const newReport: ParsedReport = JSON.parse(JSON.stringify(baseReport));
 
-    const reportId = getCurrentReportId();
     const { data: { session } } = await supabase.auth.getSession();
     const userId = session?.user.id;
-    const canUseStorage = !!(reportId && userId && photoFile);
+    const canUseStorage = !!(userId && photoFile);
 
     const newIssue: Issue = {
       title: title.trim(),
@@ -121,28 +121,30 @@ export default function AddIssuePage({
       photoBase64: canUseStorage ? undefined : photo ?? undefined,
     };
 
-    let idx = newReport.sections.findIndex(
+    const newSections = targetReport.sections.map((s) => ({ ...s, issues: [...s.issues] }));
+    let idx = newSections.findIndex(
       (s) => s.slug === section || normalize(s.name) === normalize(sectionConfig?.label ?? section)
     );
     if (idx === -1) {
-      newReport.sections.push({ name: sectionConfig?.label ?? section, slug: section, issues: [newIssue] });
-      idx = newReport.sections.length - 1;
+      newSections.push({ name: sectionConfig?.label ?? section, slug: section, issues: [newIssue] });
+      idx = newSections.length - 1;
     } else {
-      newReport.sections[idx].issues.push(newIssue);
+      newSections[idx].issues.push(newIssue);
     }
-    const newIssueIndex = newReport.sections[idx].issues.length - 1;
+    const newIssueIndex = newSections[idx].issues.length - 1;
 
-    await updateReport(newReport);
+    await updateReportSections(base.id, newSections);
 
     if (canUseStorage) {
-      const path = await uploadIssuePhoto(userId, reportId, section, newIssueIndex, photoFile);
-      if (path) await saveIssueDetails(section, newIssueIndex, { photoPaths: [path] });
+      const path = await uploadIssuePhoto(userId, base.id, section, newIssueIndex, photoFile);
+      if (path) await saveIssueDetails(base.id, section, newIssueIndex, { photoPaths: [path] });
     }
 
     if (type === "enhancement") {
       await saveCompletion({
         slug: section,
         issueIndex: newIssueIndex,
+        reportId: base.id,
         completedBy: "me",
         completedAt: new Date().toISOString(),
       });
@@ -155,7 +157,7 @@ export default function AddIssuePage({
     }, 900);
   }
 
-  if (!loaded) return null;
+  if (!loaded) return <PageSkeleton />;
 
   return (
     <div className="mx-auto min-h-screen max-w-[430px] bg-porch-bg pb-10 text-porch-text">
@@ -238,7 +240,7 @@ export default function AddIssuePage({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={type === "issue" ? "e.g. Dishwasher won't drain" : "e.g. Repainted the kitchen"}
-          className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          className="w-full rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-[14.5px] text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
         />
       </div>
 
@@ -249,7 +251,7 @@ export default function AddIssuePage({
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Describe what happened, what you did, or what you're seeing — in your own words."
           rows={4}
-          className="w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-sm leading-relaxed text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+          className="w-full resize-y rounded-[10px] border border-porch-border-input bg-porch-surface px-3.5 py-3 text-sm leading-relaxed text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
         />
       </div>
 
@@ -319,7 +321,7 @@ export default function AddIssuePage({
             onKeyDown={(e) => { if (e.key === "Enter") handleAddSection(); }}
             placeholder="e.g. Detached Garage"
             autoFocus
-            className="mb-3.5 w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            className="mb-3.5 w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
           />
           <label className="mb-1.5 block text-[13px] font-semibold text-porch-text">Description</label>
           <input
@@ -327,7 +329,7 @@ export default function AddIssuePage({
             value={newSectionDesc}
             onChange={(e) => setNewSectionDesc(e.target.value)}
             placeholder="What's covered here?"
-            className="mb-[18px] w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none"
+            className="mb-[18px] w-full rounded-[10px] border border-porch-border-input bg-porch-bg px-3.5 py-2.5 text-sm text-porch-text placeholder:text-porch-text-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-porch-accent focus-visible:ring-offset-1"
           />
           <div className="flex gap-2">
             <button

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 const client = new Anthropic();
 
 export async function POST(request: NextRequest) {
@@ -16,6 +18,9 @@ export async function POST(request: NextRequest) {
       feedback,
       existingBriefing,
       userObservation,
+      photoUrls,
+      location,
+      propertyContext,
     } = body as {
       issueTitle: string;
       issueDescription: string;
@@ -26,6 +31,9 @@ export async function POST(request: NextRequest) {
       feedback?: string;
       existingBriefing?: string;
       userObservation?: string;
+      photoUrls?: string[];
+      location?: string;
+      propertyContext?: string;
     };
 
     if (!issueTitle || !issueDescription) {
@@ -37,12 +45,18 @@ export async function POST(request: NextRequest) {
     const observationLine = userObservation
       ? `\nHomeowner's firsthand observation: ${userObservation}`
       : "";
+    const propertyContextBlock = propertyContext
+      ? `\nWhat we know about this home:\n${propertyContext}\nAccount for the home's age and systems where relevant.`
+      : "";
+    const locationLine = location
+      ? `\nThe home is near: ${location} — mention local permit norms only if clearly relevant.`
+      : "";
 
     const userContent = isRefinement
       ? `You previously wrote this contractor briefing for a home inspection issue:
 
 Issue: ${issueTitle}
-Description: ${issueDescription}${observationLine}
+Description: ${issueDescription}${observationLine}${propertyContextBlock}${locationLine}
 
 --- Current Briefing ---
 ${existingBriefing}
@@ -66,7 +80,7 @@ Do not bold, italicize, or otherwise markdown-format any of the body text — on
 Issue: ${issueTitle}
 Description: ${issueDescription}
 Severity: ${severity}
-Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nTypical equipment involved: ${equipmentSpecs.join(", ")}` : ""}${costEstimatePro ? `\nEstimated professional cost: ${costEstimatePro}` : ""}${observationLine}
+Recommended Action: ${recommendedAction}${equipmentSpecs?.length ? `\nTypical equipment involved: ${equipmentSpecs.join(", ")}` : ""}${costEstimatePro ? `\nEstimated professional cost: ${costEstimatePro}` : ""}${observationLine}${propertyContextBlock}${locationLine}
 
 Write the briefing as exactly four sections, each starting with a "### " markdown header using exactly these titles, followed by a blank line and then one short plain-prose paragraph (no bullet lists, no sub-headers):
 ### What the contractor will assess and do
@@ -87,6 +101,11 @@ Plain paragraph text here, no bold.
 
 Do not bold, italicize, or otherwise markdown-format any of the body text — only the "### " header lines use markdown. Mention permits or inspections where relevant within those sections rather than as a separate one. Keep it practical and direct — 220 to 380 words total.`;
 
+    const imageBlocks: Anthropic.ImageBlockParam[] = (photoUrls ?? []).map((url) => ({
+      type: "image",
+      source: { type: "url", url },
+    }));
+
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 2048,
@@ -95,7 +114,17 @@ Do not bold, italicize, or otherwise markdown-format any of the body text — on
       messages: [
         {
           role: "user",
-          content: userContent,
+          content: [
+            ...imageBlocks,
+            {
+              type: "text",
+              text:
+                userContent +
+                (imageBlocks.length
+                  ? "\n\nPhotos of the issue are attached — reference what's visible where it changes what the contractor should assess."
+                  : ""),
+            },
+          ],
         },
       ],
     });

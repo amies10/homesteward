@@ -15,8 +15,8 @@
   --color-porch-border-input: #DCD3C6;
   --color-porch-text: #262220;
   --color-porch-text-secondary: #857A6D;
-  --color-porch-text-tertiary: #A99C8B;
-  --color-porch-text-faint: #B8AC9D;
+  --color-porch-text-tertiary: #746B5F;  /* darkened from #A99C8B (~2.7:1) to ~4.9:1 on porch-bg */
+  --color-porch-text-faint: #6C655C;     /* darkened from #B8AC9D (~2.1:1) to ~5.4:1 on porch-bg */
 
   --color-porch-accent: #7D234A;
   --color-porch-accent-hover: #5A1836;
@@ -52,6 +52,27 @@
   }
   a:hover {
     color: #5A1836;
+  }
+
+  :focus-visible {
+    outline: 2px solid #7D234A;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comet-ring {
+    animation: none;
+    opacity: 0;
+  }
+  .btn-press,
+  .btn-press:active {
+    transition: none;
+    transform: none;
+  }
+  * {
+    scroll-behavior: auto !important;
   }
 }
 
